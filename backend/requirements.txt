@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+alembic
+psycopg2-binary
+pydantic[email]
+pydantic-settings
+python-jose[cryptography]
+passlib[argon2]
+python-multipart
+redis
+httpx
+python-dotenv
+jinja2
+# For PDF generation
+playwright
