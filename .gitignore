@@ -1,0 +1,31 @@
+# Ignore Node modules and build files
+node_modules/
+dist/
+build/
+.next/
+out/
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Backups and temporary files
+_backup_root_duplicates/
+*.db
+*.sqlite
+
+# Python leftovers
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# OS metadata
+.DS_Store
+Thumbs.db
