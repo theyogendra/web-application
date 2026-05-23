@@ -3,43 +3,65 @@ const router = express.Router();
 const supabase = require('../config/supabase');
 const { validateInvoicePayload } = require('../services/invoice-validation.service');
 const { createAuditLog } = require('../services/audit.service');
-const { requirePermission, authenticate } = require('../middleware/auth.middleware');
+const { requirePermission, authenticate, optionalAuth } = require('../middleware/auth.middleware');
+const { generateInvoiceNumber } = require('../services/numbering.service');
+const { generateInvoicePdf } = require('../services/pdf.service');
+const { sendInvoiceEmail, sendOverdueReminderEmail } = require('../services/email.service');
+const { isOverdue } = require('../services/reports.service');
+const { sanitizeSearch } = require('../utils/escape');
 
-// GET all invoices
+router.use(optionalAuth);
+
+// GET all invoices (supports status / customer / search / date-range filters)
 router.get('/', async (req, res, next) => {
   try {
-    const { data, error } = await supabase
+    const { status, from, to } = req.query;
+    const customer = sanitizeSearch(req.query.customer);
+    const search = sanitizeSearch(req.query.search);
+
+    let q = supabase
       .from('invoices')
       .select('*, customers(name), vendors(name)')
       .order('created_at', { ascending: false });
-      
+
+    if (status) q = q.eq('status', status);
+    if (customer) q = q.ilike('customer_name', `%${customer}%`);
+    if (from) q = q.gte('invoice_date', from);
+    if (to) q = q.lte('invoice_date', to);
+    if (search) q = q.or(`invoice_number.ilike.%${search}%,customer_name.ilike.%${search}%`);
+
+    const { data, error } = await q;
     if (error) throw error;
-    res.json(data);
+
+    res.json({
+      success: true,
+      data: (data || []).map((inv) => ({ ...inv, is_overdue: isOverdue(inv) }))
+    });
   } catch (err) {
     next(err);
   }
 });
 
-// GET single invoice by id
+// GET single invoice by id (with items + payments)
 router.get('/:id', async (req, res, next) => {
   try {
     const { data, error } = await supabase
       .from('invoices')
-      .select('*, invoice_items(*), customers(name, email, billing_address, gst_number), vendors(name, email, billing_address, gst_number)')
+      .select('*, invoice_items(*), payments(*), customers(name, email, billing_address, gst_number), vendors(name, email, billing_address, gst_number)')
       .eq('id', req.params.id)
       .single();
-      
+
     if (error) throw error;
     if (!data) return res.status(404).json({ message: 'Invoice not found' });
-    
-    res.json(data);
+
+    res.json({ ...data, is_overdue: isOverdue(data) });
   } catch (err) {
     next(err);
   }
 });
 
 // CREATE invoice (Draft)
-router.post('/', requirePermission('can_create_invoice'), async (req, res, next) => {
+router.post('/', requirePermission('invoices.create'), async (req, res, next) => {
   try {
     const userId = req.user ? req.user.id : null;
     
@@ -52,49 +74,52 @@ router.post('/', requirePermission('can_create_invoice'), async (req, res, next)
     
     const { subtotal, discount_amount, tax_amount, grand_total } = validation.calculatedTotals;
 
-    // Insert invoice
-    const { data: invoice, error: invoiceError } = await supabase
-      .from('invoices')
-      .insert([{
-        invoice_number: req.body.invoice_number || null,
-        customer_id: req.body.customer_id || null,
-        vendor_id: req.body.vendor_id || null,
-        status: 'draft',
-        validation_status: validationStatus,
-        validation_errors: validation.errors,
-        validation_warnings: validation.warnings,
-        subtotal,
-        discount: discount_amount,
-        tax_amount,
-        grand_total,
-        created_by: userId
-      }])
-      .select()
-      .single();
+    // Auto-generate a sequential invoice number when one is not supplied.
+    const invoiceNumber = req.body.invoice_number || await generateInvoiceNumber();
 
-    if (invoiceError) throw invoiceError;
+    // Atomic insert via create_invoice_with_items RPC (phase 8): invoice +
+    // items either both commit or both rollback.
+    const invoiceInput = {
+      invoice_number: invoiceNumber,
+      customer_id: req.body.customer_id || null,
+      vendor_id: req.body.vendor_id || null,
+      customer_name: req.body.customer_name || null,
+      customer_email: req.body.customer_email || null,
+      customer_phone: req.body.customer_phone || null,
+      billing_address: req.body.billing_address || null,
+      invoice_date: req.body.invoice_date || new Date().toISOString().slice(0, 10),
+      due_date: req.body.due_date || null,
+      notes: req.body.notes || null,
+      terms: req.body.terms || null,
+      status: 'draft',
+      validation_status: validationStatus,
+      validation_errors: validation.errors,
+      validation_warnings: validation.warnings,
+      subtotal,
+      discount: discount_amount,
+      tax_amount,
+      grand_total,
+      paid_amount: 0,
+      balance_due: grand_total,
+      created_by: userId
+    };
 
-    // Insert items
-    if (validation.normalizedItems.length > 0) {
-      const itemsToInsert = validation.normalizedItems.map(item => ({
-        ...item,
-        invoice_id: invoice.id,
-        validation_errors: [] // Store item specific errors if needed
-      }));
-      
-      const { error: itemsError } = await supabase
-        .from('invoice_items')
-        .insert(itemsToInsert);
-        
-      if (itemsError) throw itemsError;
+    const { data: result, error: rpcError } = await supabase.rpc('create_invoice_with_items', {
+      invoice_input: invoiceInput,
+      items_input: validation.normalizedItems
+    });
+    if (rpcError) throw rpcError;
+    if (!result || !result.success) {
+      return res.status(400).json(result || { success: false, message: 'Create failed' });
     }
 
-    // Audit Log
+    const { data: invoice } = await supabase.from('invoices').select('*').eq('id', result.invoice_id).maybeSingle();
+
     await createAuditLog({
       userId,
       action: 'invoice_created',
       entityType: 'invoice',
-      entityId: invoice.id,
+      entityId: result.invoice_id,
       oldData: null,
       newData: invoice,
       ipAddress: req.ip
@@ -112,7 +137,7 @@ router.post('/', requirePermission('can_create_invoice'), async (req, res, next)
 });
 
 // UPDATE invoice
-router.put('/:id', requirePermission('can_edit_invoice'), async (req, res, next) => {
+router.put('/:id', requirePermission('invoices.update'), async (req, res, next) => {
   try {
     const { id } = req.params;
     const userId = req.user ? req.user.id : null;
@@ -137,52 +162,45 @@ router.put('/:id', requirePermission('can_edit_invoice'), async (req, res, next)
     const validationStatus = validation.isValid ? 'passed' : 'failed';
     const { subtotal, discount_amount, tax_amount, grand_total } = validation.calculatedTotals;
 
-    // Update invoice record
-    const { data: invoice, error: invoiceError } = await supabase
-      .from('invoices')
-      .update({
-        invoice_number: req.body.invoice_number !== undefined ? req.body.invoice_number : existing.invoice_number,
-        customer_id: req.body.customer_id !== undefined ? req.body.customer_id : existing.customer_id,
-        vendor_id: req.body.vendor_id !== undefined ? req.body.vendor_id : existing.vendor_id,
-        status: req.body.status && ['draft', 'needs_review'].includes(req.body.status) ? req.body.status : existing.status,
-        validation_status: validationStatus,
-        validation_errors: validation.errors,
-        validation_warnings: validation.warnings,
-        subtotal,
-        discount: discount_amount,
-        tax_amount,
-        grand_total,
-        updated_by: userId,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', id)
-      .select()
-      .single();
+    // Keep balance_due consistent with the recalculated grand total.
+    const paidSoFar = Number(existing.paid_amount) || 0;
+    const newBalance = Math.round((grand_total - paidSoFar) * 100) / 100;
 
-    if (invoiceError) throw invoiceError;
+    // Atomic update via update_invoice_with_items RPC (phase 8).
+    const invoicePatch = {
+      invoice_number:    req.body.invoice_number   !== undefined ? req.body.invoice_number   : undefined,
+      customer_id:       req.body.customer_id      !== undefined ? req.body.customer_id      : undefined,
+      vendor_id:         req.body.vendor_id        !== undefined ? req.body.vendor_id        : undefined,
+      customer_name:     req.body.customer_name    !== undefined ? req.body.customer_name    : undefined,
+      customer_email:    req.body.customer_email   !== undefined ? req.body.customer_email   : undefined,
+      customer_phone:    req.body.customer_phone   !== undefined ? req.body.customer_phone   : undefined,
+      billing_address:   req.body.billing_address  !== undefined ? req.body.billing_address  : undefined,
+      invoice_date:      req.body.invoice_date     !== undefined ? req.body.invoice_date     : undefined,
+      due_date:          req.body.due_date         !== undefined ? req.body.due_date         : undefined,
+      notes:             req.body.notes            !== undefined ? req.body.notes            : undefined,
+      terms:             req.body.terms            !== undefined ? req.body.terms            : undefined,
+      status:            req.body.status && ['draft', 'needs_review', 'sent'].includes(req.body.status) ? req.body.status : undefined,
+      validation_status: validationStatus,
+      validation_errors: validation.errors,
+      validation_warnings: validation.warnings,
+      subtotal,
+      discount: discount_amount,
+      tax_amount,
+      grand_total,
+      balance_due: newBalance,
+      updated_by: userId
+    };
 
-    // Replace items safely
-    if (req.body.items) {
-      const { error: deleteError } = await supabase
-        .from('invoice_items')
-        .delete()
-        .eq('invoice_id', id);
-        
-      if (deleteError) throw deleteError;
-
-      if (validation.normalizedItems.length > 0) {
-        const itemsToInsert = validation.normalizedItems.map(item => ({
-          ...item,
-          invoice_id: id
-        }));
-        
-        const { error: itemsError } = await supabase
-          .from('invoice_items')
-          .insert(itemsToInsert);
-          
-        if (itemsError) throw itemsError;
-      }
+    const { data: updateResult, error: updateRpcError } = await supabase.rpc('update_invoice_with_items', {
+      invoice_id_input: id,
+      invoice_input: invoicePatch,
+      items_input: req.body.items ? validation.normalizedItems : null
+    });
+    if (updateRpcError) throw updateRpcError;
+    if (!updateResult || !updateResult.success) {
+      return res.status(400).json(updateResult || { success: false, message: 'Update failed' });
     }
+    const { data: invoice } = await supabase.from('invoices').select('*').eq('id', id).maybeSingle();
 
     // Audit Log
     await createAuditLog({
@@ -207,7 +225,7 @@ router.put('/:id', requirePermission('can_edit_invoice'), async (req, res, next)
 });
 
 // VALIDATE invoice API
-router.post('/:id/validate', requirePermission('can_edit_invoice'), async (req, res, next) => {
+router.post('/:id/validate', requirePermission('invoices.update'), async (req, res, next) => {
   try {
     const { id } = req.params;
     const userId = req.user ? req.user.id : null;
@@ -260,7 +278,7 @@ router.post('/:id/validate', requirePermission('can_edit_invoice'), async (req, 
 });
 
 // SUBMIT invoice
-router.post('/:id/submit', requirePermission('can_submit_invoice'), async (req, res, next) => {
+router.post('/:id/submit', requirePermission('invoices.update'), async (req, res, next) => {
   try {
     const { id } = req.params;
     const userId = req.user ? req.user.id : null;
@@ -348,7 +366,7 @@ router.post('/:id/submit', requirePermission('can_submit_invoice'), async (req, 
 });
 
 // STOCK CHECK
-router.get('/:id/stock-check', requirePermission('can_edit_invoice'), async (req, res, next) => {
+router.get('/:id/stock-check', requirePermission('invoices.update'), async (req, res, next) => {
   try {
     const { id } = req.params;
     
@@ -360,20 +378,27 @@ router.get('/:id/stock-check', requirePermission('can_edit_invoice'), async (req
       
     if (invoiceError || !invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
 
+    // Batch-load stock for every product on the invoice (was N+1 before).
+    const productIds = Array.from(
+      new Set(invoice.invoice_items.map((it) => it.product_id).filter(Boolean))
+    );
+    const stockById = new Map();
+    if (productIds.length > 0) {
+      const { data: products, error: pErr } = await supabase
+        .from('products').select('id, stock').in('id', productIds);
+      if (pErr) throw pErr;
+      for (const p of products || []) stockById.set(p.id, p.stock);
+    }
+
     let can_fulfill_all = true;
     const itemsResult = [];
 
     for (const item of invoice.invoice_items) {
       if (!item.product_id) continue;
-      
-      const { data: product } = await supabase.from('products').select('stock').eq('id', item.product_id).single();
-      
-      const available = product ? product.stock : 0;
+      const available = stockById.has(item.product_id) ? stockById.get(item.product_id) : 0;
       const required = item.quantity;
       const can_fulfill = available >= required;
-      
       if (!can_fulfill) can_fulfill_all = false;
-      
       itemsResult.push({
         invoice_item_id: item.id,
         product_id: item.product_id,
@@ -398,7 +423,7 @@ router.get('/:id/stock-check', requirePermission('can_edit_invoice'), async (req
 });
 
 // RESERVE STOCK
-router.post('/:id/reserve-stock', requirePermission('can_edit_invoice'), async (req, res, next) => {
+router.post('/:id/reserve-stock', requirePermission('invoices.update'), async (req, res, next) => {
   try {
     const { id } = req.params;
     const userId = req.user ? req.user.id : null;
@@ -416,16 +441,10 @@ router.post('/:id/reserve-stock', requirePermission('can_edit_invoice'), async (
       });
     }
 
-    console.log(`[DEBUG] Reserve Stock hit for ID: ${id}`);
-    console.log(`[DEBUG] Invoice status: ${invoice.status}`);
-
     const { data, error } = await supabase.rpc('reserve_invoice_stock', { invoice_id_input: id, user_id_input: userId });
-    
-    console.log(`[DEBUG] RPC Result:`, data);
-    if (error) console.error(`[DEBUG] RPC Error:`, error);
-    
-    if (!data.success) {
-      return res.status(400).json(data);
+    if (error) throw error;
+    if (!data || !data.success) {
+      return res.status(400).json(data || { success: false, message: 'Stock reservation failed' });
     }
 
     await createAuditLog({
@@ -458,7 +477,7 @@ router.post('/:id/reserve-stock', requirePermission('can_edit_invoice'), async (
 });
 
 // CONFIRM STOCK
-router.post('/:id/confirm-stock', requirePermission('can_submit_invoice'), async (req, res, next) => {
+router.post('/:id/confirm-stock', requirePermission('invoices.update'), async (req, res, next) => {
   try {
     const { id } = req.params;
     const userId = req.user ? req.user.id : null;
@@ -466,9 +485,6 @@ router.post('/:id/confirm-stock', requirePermission('can_submit_invoice'), async
     // Load invoice to check status
     const { data: invoice, error: invoiceError } = await supabase.from('invoices').select('status').eq('id', id).single();
     if (invoiceError || !invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
-
-    console.log(`[DEBUG] Confirm Stock hit for ID: ${id}`);
-    console.log(`[DEBUG] Invoice status: ${invoice.status}`);
 
     if (!['submitted', 'approved'].includes(invoice.status)) {
       return res.status(400).json({
@@ -478,14 +494,9 @@ router.post('/:id/confirm-stock', requirePermission('can_submit_invoice'), async
     }
 
     const { data, error } = await supabase.rpc('confirm_invoice_stock', { invoice_id_input: id, user_id_input: userId });
-    
-    console.log(`[DEBUG] RPC Result:`, data);
-    if (error) console.error(`[DEBUG] RPC Error:`, error);
-    
     if (error) throw error;
-    
-    if (!data.success) {
-      return res.status(400).json(data);
+    if (!data || !data.success) {
+      return res.status(400).json(data || { success: false, message: 'Stock confirmation failed' });
     }
 
     await createAuditLog({
@@ -518,7 +529,7 @@ router.post('/:id/confirm-stock', requirePermission('can_submit_invoice'), async
 });
 
 // RELEASE STOCK
-router.post('/:id/release-stock', requirePermission('can_edit_invoice'), async (req, res, next) => {
+router.post('/:id/release-stock', requirePermission('invoices.update'), async (req, res, next) => {
   try {
     const { id } = req.params;
     const userId = req.user ? req.user.id : null;
@@ -561,7 +572,7 @@ router.post('/:id/release-stock', requirePermission('can_edit_invoice'), async (
 });
 
 // RESTORE STOCK
-router.post('/:id/restore-stock', requirePermission('can_edit_invoice'), async (req, res, next) => {
+router.post('/:id/restore-stock', requirePermission('invoices.update'), async (req, res, next) => {
   try {
     const { id } = req.params;
     const userId = req.user ? req.user.id : null;
@@ -604,7 +615,7 @@ router.post('/:id/restore-stock', requirePermission('can_edit_invoice'), async (
 });
 
 // CANCEL INVOICE
-router.post('/:id/cancel', requirePermission('can_edit_invoice'), async (req, res, next) => {
+router.post('/:id/cancel', requirePermission('invoices.update'), async (req, res, next) => {
   try {
     const { id } = req.params;
     const userId = req.user ? req.user.id : null;
@@ -621,11 +632,21 @@ router.post('/:id/cancel', requirePermission('can_edit_invoice'), async (req, re
       return res.status(400).json({ success: false, message: 'Cannot cancel a paid invoice' });
     }
 
-    // Handle stock
-    if (existing.stock_status === 'reserved') {
-      await supabase.rpc('release_invoice_stock', { invoice_id_input: id, user_id_input: userId });
-    } else if (existing.stock_status === 'reduced') {
-      await supabase.rpc('restore_invoice_stock', { invoice_id_input: id, user_id_input: userId });
+    // Release / restore any held stock before cancelling. If the RPC returns
+    // a failure jsonb we abort so we don't orphan inventory.
+    if (existing.stock_status === 'reserved' || existing.stock_status === 'reduced') {
+      const rpcName = existing.stock_status === 'reserved'
+        ? 'release_invoice_stock'
+        : 'restore_invoice_stock';
+      const { data: stockResult, error: stockErr } = await supabase
+        .rpc(rpcName, { invoice_id_input: id, user_id_input: userId });
+      if (stockErr) throw stockErr;
+      if (stockResult && stockResult.success === false) {
+        return res.status(409).json({
+          success: false,
+          message: `Cancel aborted: ${stockResult.message || 'stock release failed'}`
+        });
+      }
     }
 
     const { data: updated, error: updateError } = await supabase.from('invoices').update({
@@ -650,7 +671,7 @@ router.post('/:id/cancel', requirePermission('can_edit_invoice'), async (req, re
 });
 
 // REQUEST APPROVAL
-router.post('/:id/request-approval', requirePermission('can_submit_invoice'), async (req, res, next) => {
+router.post('/:id/request-approval', requirePermission('invoices.update'), async (req, res, next) => {
   try {
     const { id } = req.params;
     const userId = req.user ? req.user.id : null;
@@ -763,7 +784,7 @@ router.post('/:id/request-approval', requirePermission('can_submit_invoice'), as
 });
 
 // APPROVE INVOICE
-router.post('/:id/approve', requirePermission('can_approve_invoice'), async (req, res, next) => {
+router.post('/:id/approve', requirePermission('invoices.approve'), async (req, res, next) => {
   try {
     const { id } = req.params;
     const { remarks } = req.body;
@@ -869,7 +890,7 @@ router.post('/:id/approve', requirePermission('can_approve_invoice'), async (req
 });
 
 // REJECT INVOICE
-router.post('/:id/reject', requirePermission('can_approve_invoice'), async (req, res, next) => {
+router.post('/:id/reject', requirePermission('invoices.approve'), async (req, res, next) => {
   try {
     const { id } = req.params;
     const { remarks } = req.body;
@@ -968,6 +989,213 @@ router.post('/:id/reject', requirePermission('can_approve_invoice'), async (req,
       success: true,
       message: 'Invoice rejected successfully',
       data: updatedInvoice
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE / CANCEL invoice
+// Drafts with no payments are hard-deleted; anything else is cancelled so
+// the financial trail is preserved.
+router.delete('/:id', requirePermission('invoices.delete'), async (req, res, next) => {
+  try {
+    const userId = req.user ? req.user.id : null;
+
+    const { data: existing, error } = await supabase
+      .from('invoices')
+      .select('*, payments(id)')
+      .eq('id', req.params.id)
+      .single();
+
+    if (error || !existing) return res.status(404).json({ success: false, message: 'Invoice not found' });
+
+    const hasPayments = existing.payments && existing.payments.length > 0;
+
+    if (existing.status === 'paid') {
+      return res.status(400).json({ success: false, message: 'A fully paid invoice cannot be deleted. Issue a credit note instead.' });
+    }
+    if (existing.status === 'cancelled') {
+      return res.status(400).json({ success: false, message: 'Invoice is already cancelled' });
+    }
+
+    // Helper: release/restore held stock, aborting if the RPC reports failure
+    // so we never delete/cancel an invoice while leaving inventory orphaned.
+    async function releaseHeldStock() {
+      if (existing.stock_status !== 'reserved' && existing.stock_status !== 'reduced') return null;
+      const rpcName = existing.stock_status === 'reserved'
+        ? 'release_invoice_stock'
+        : 'restore_invoice_stock';
+      const { data: stockResult, error: stockErr } = await supabase
+        .rpc(rpcName, { invoice_id_input: existing.id, user_id_input: userId });
+      if (stockErr) throw stockErr;
+      if (stockResult && stockResult.success === false) return stockResult.message || 'stock release failed';
+      return null;
+    }
+
+    if (existing.status === 'draft' && !hasPayments) {
+      const stockErrMsg = await releaseHeldStock();
+      if (stockErrMsg) {
+        return res.status(409).json({ success: false, message: `Delete aborted: ${stockErrMsg}` });
+      }
+      const { error: delErr } = await supabase.from('invoices').delete().eq('id', req.params.id);
+      if (delErr) throw delErr;
+
+      await createAuditLog({
+        req, action: 'invoice_deleted', module: 'Invoices',
+        entityType: 'invoice', entityId: existing.id, oldData: existing
+      });
+      return res.json({ success: true, message: 'Invoice deleted', deleted: true });
+    }
+
+    const stockErrMsg = await releaseHeldStock();
+    if (stockErrMsg) {
+      return res.status(409).json({ success: false, message: `Cancel aborted: ${stockErrMsg}` });
+    }
+
+    const { data: updated, error: updErr } = await supabase
+      .from('invoices')
+      .update({ status: 'cancelled', updated_by: userId, updated_at: new Date().toISOString() })
+      .eq('id', req.params.id)
+      .select()
+      .single();
+    if (updErr) throw updErr;
+
+    await createAuditLog({
+      req, action: 'invoice_cancelled', module: 'Invoices',
+      entityType: 'invoice', entityId: existing.id, oldData: existing, newData: updated
+    });
+
+    res.json({ success: true, message: 'Invoice cancelled', data: updated, deleted: false });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// SEND invoice by email (also marks a draft as "sent")
+router.post('/:id/send', requirePermission('invoices.send'), async (req, res, next) => {
+  try {
+    const { data: invoice, error } = await supabase
+      .from('invoices')
+      .select('*, invoice_items(*)')
+      .eq('id', req.params.id)
+      .single();
+
+    if (error || !invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
+    if (!invoice.customer_email) {
+      return res.status(400).json({ success: false, message: 'Invoice has no customer email address' });
+    }
+
+    const { data: company } = await supabase.from('company_settings').select('*').limit(1).maybeSingle();
+
+    // The customer-facing artefact MUST exist before we touch state — better
+    // to fail loudly than send a body-only email.
+    let pdfBuffer;
+    try {
+      pdfBuffer = await generateInvoicePdf(invoice, invoice.invoice_items || [], company || {});
+    } catch (pdfErr) {
+      console.error('Invoice PDF generation failed:', pdfErr);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to generate the invoice PDF. The invoice was not sent.',
+        detail: pdfErr.message
+      });
+    }
+
+    const emailResult = await sendInvoiceEmail(invoice, pdfBuffer);
+
+    // Advance status only when the email actually went out. Skipped (no
+    // Resend key) and failed deliveries leave the source state alone so the
+    // user can retry once email is fixed.
+    let updated = invoice;
+    if (emailResult.success) {
+      const patch = {};
+      if (['draft', 'needs_review', 'submitted'].includes(invoice.status)) patch.status = 'sent';
+      if (!invoice.sent_at) patch.sent_at = new Date().toISOString();
+      if (Object.keys(patch).length > 0) {
+        const { data: u, error: upErr } = await supabase
+          .from('invoices').update(patch).eq('id', invoice.id).select().single();
+        if (upErr) console.error('Failed to mark invoice as sent:', upErr.message);
+        if (u) updated = u;
+      }
+    }
+
+    await createAuditLog({
+      req,
+      action: emailResult.success
+        ? 'invoice_sent'
+        : (emailResult.skipped ? 'invoice_send_skipped' : 'invoice_send_failed'),
+      module: 'Invoices',
+      entityType: 'invoice', entityId: invoice.id,
+      details: { to: invoice.customer_email, email_status: emailResult }
+    });
+
+    const status = emailResult.success ? 200 : (emailResult.skipped ? 200 : 502);
+    res.status(status).json({
+      success: !!emailResult.success,
+      skipped: !!emailResult.skipped,
+      message: emailResult.success
+        ? 'Invoice sent successfully'
+        : (emailResult.skipped
+          ? 'Email skipped: RESEND_API_KEY not configured. Configure the key and retry to send.'
+          : `Email delivery failed: ${emailResult.message || 'unknown error'}`),
+      data: updated,
+      email: emailResult
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DOWNLOAD invoice as PDF
+router.get('/:id/pdf', async (req, res, next) => {
+  try {
+    const { data: invoice, error } = await supabase
+      .from('invoices')
+      .select('*, invoice_items(*)')
+      .eq('id', req.params.id)
+      .single();
+
+    if (error || !invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
+
+    const { data: company } = await supabase.from('company_settings').select('*').limit(1).maybeSingle();
+    const pdfBuffer = await generateInvoicePdf(invoice, invoice.invoice_items || [], company || {});
+
+    await createAuditLog({
+      req, action: 'invoice_downloaded', module: 'Invoices',
+      entityType: 'invoice', entityId: invoice.id
+    });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${invoice.invoice_number || 'invoice'}.pdf"`);
+    res.send(pdfBuffer);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// SEND overdue reminder
+router.post('/:id/send-reminder', requirePermission('invoices.send'), async (req, res, next) => {
+  try {
+    const { data: invoice, error } = await supabase
+      .from('invoices').select('*').eq('id', req.params.id).single();
+
+    if (error || !invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
+    if (!invoice.customer_email) {
+      return res.status(400).json({ success: false, message: 'Invoice has no customer email address' });
+    }
+
+    const emailResult = await sendOverdueReminderEmail(invoice);
+
+    await createAuditLog({
+      req, action: 'invoice_reminder_sent', module: 'Invoices',
+      entityType: 'invoice', entityId: invoice.id, details: { email_status: emailResult }
+    });
+
+    res.json({
+      success: emailResult.success !== false,
+      message: emailResult.message || 'Reminder sent',
+      email: emailResult
     });
   } catch (err) {
     next(err);

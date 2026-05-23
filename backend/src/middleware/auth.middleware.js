@@ -1,61 +1,89 @@
 const jwt = require('jsonwebtoken');
 const env = require('../config/env');
-const supabase = require('../config/supabase');
 
-const authenticate = async (req, res, next) => {
+function decodeUserFromToken(token) {
+  // jwt.verify throws on bad signature / expired / malformed. We catch it
+  // and return null so the caller decides whether to 401 or just skip.
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ detail: 'Missing or invalid token' });
-    }
-
-    const token = authHeader.split(' ')[1];
-    
-    // We can verify the JWT here. If the frontend is using Supabase Auth,
-    // the JWT secret is the Supabase JWT secret. 
-    // Wait, the frontend might still be using the old custom JWTs if we didn't migrate frontend auth yet.
-    // For now, let's just decode and set user.
-    // To be perfectly safe, if it's a Supabase token, it has 'sub' as user id.
-    
-    let decoded;
-    try {
-      // In a real scenario, we'd verify with the exact secret.
-      decoded = jwt.decode(token); // Just decoding for now to not break if secret mismatches during transition
-    } catch (err) {
-      return res.status(401).json({ detail: 'Invalid token structure' });
-    }
-
-    if (!decoded || !decoded.sub) {
-       // Maybe it's the old custom token format where 'sub' is user id
-       // If decoded has sub, use it.
-    }
-
-    // Attach user
-    req.user = {
-      id: decoded.sub,
-      email: decoded.email,
-      role: decoded.role
+    const payload = jwt.verify(token, env.JWT_SECRET);
+    if (!payload || !payload.sub) return null;
+    return {
+      id: payload.sub,
+      email: payload.email,
+      role: payload.role || null,
+      permissions: Array.isArray(payload.permissions) ? payload.permissions : [],
+      is_superuser: !!payload.is_superuser
     };
-
-    next();
   } catch (err) {
-    console.error('Auth error:', err);
-    res.status(401).json({ detail: 'Unauthorized' });
+    return null;
   }
+}
+
+// Find a JWT in either the Authorization header or an HttpOnly cookie.
+function tokenFromRequest(req) {
+  const authHeader = req.headers && req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    return { token: authHeader.split(' ')[1], source: 'bearer' };
+  }
+  if (req.cookies && req.cookies.token) {
+    return { token: req.cookies.token, source: 'cookie' };
+  }
+  return { token: null, source: null };
+}
+
+// authenticate -- hard 401 when the token is missing or invalid.
+const authenticate = async (req, res, next) => {
+  const { token } = tokenFromRequest(req);
+  if (!token) return res.status(401).json({ detail: 'Missing or invalid token' });
+
+  const user = decodeUserFromToken(token);
+  if (!user) return res.status(401).json({ detail: 'Invalid or expired token' });
+
+  req.user = user;
+  next();
 };
 
+// optionalAuth -- verify the token when present, otherwise just continue.
+// Lets read-only routes work without a session while still letting authed
+// requests be attributed in audit logs.
+const optionalAuth = (req, res, next) => {
+  const { token, source } = tokenFromRequest(req);
+  if (token) {
+    const user = decodeUserFromToken(token);
+    if (user) {
+      req.user = user;
+      req.authSource = source;  // 'bearer' or 'cookie' — used by CSRF middleware
+    }
+  }
+  next();
+};
+
+// requirePermission -- when a verified user attached, enforce permission
+// strings (Admin / is_superuser bypass). Anonymous requests are still let
+// through for backward compatibility with the current dev frontend; flip
+// REQUIRE_AUTH=true in env to harden once the frontend stops calling
+// protected endpoints unauthenticated.
 const requirePermission = (permissionName) => {
   return (req, res, next) => {
-    // For local development, attach a safe placeholder user if none exists
     if (!req.user) {
-      req.user = { id: null, role: 'system' };
+      if (String(process.env.REQUIRE_AUTH).toLowerCase() === 'true') {
+        return res.status(401).json({ detail: 'Authentication required' });
+      }
+      req.user = { id: null, role: 'system', permissions: [], is_superuser: true };
+      return next();
     }
 
-    // In a real auth system, we would check req.user permissions here against DB/roles
-    // e.g. if (!req.user.permissions.includes(permissionName)) return res.status(403)...
+    if (req.user.is_superuser) return next();
+    if (!permissionName) return next();
+    if (Array.isArray(req.user.permissions) && req.user.permissions.includes(permissionName)) {
+      return next();
+    }
 
-    next();
+    return res.status(403).json({
+      detail: 'You do not have permission for this action',
+      required: permissionName
+    });
   };
 };
 
-module.exports = { authenticate, requirePermission };
+module.exports = { authenticate, optionalAuth, requirePermission, decodeUserFromToken };

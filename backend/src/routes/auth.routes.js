@@ -3,69 +3,143 @@ const router = express.Router();
 const jwt = require('jsonwebtoken');
 const supabase = require('../config/supabase');
 const env = require('../config/env');
+const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const { authenticate } = require('../middleware/auth.middleware');
+const { createAuditLog } = require('../services/audit.service');
 
-// In the old python backend, it accepted OAuth2 password form (username, password).
-// But standard express usually takes json or form-data.
-// Since it accepted FormData before:
+// Cookie helper: cross-site fetch with credentials needs SameSite=None;
+// Secure (and HTTPS in prod). In local dev (NODE_ENV !== 'production') we
+// drop Secure so cookies still set over http://localhost.
+const isProd = env.NODE_ENV === 'production';
+const COOKIE_BASE = {
+  path: '/',
+  sameSite: isProd ? 'none' : 'lax',
+  secure: isProd
+};
+const TOKEN_TTL_MS = 8 * 24 * 60 * 60 * 1000;  // 8 days, matches JWT expiry
+
+function setAuthCookies(res, token) {
+  // HttpOnly token cookie — JS can't read it, mitigates XSS theft.
+  res.cookie('token', token, { ...COOKIE_BASE, httpOnly: true, maxAge: TOKEN_TTL_MS });
+  // Non-HttpOnly CSRF cookie — frontend reads + echoes in X-CSRF-Token.
+  const csrf = crypto.randomBytes(24).toString('hex');
+  res.cookie('csrf', csrf, { ...COOKIE_BASE, httpOnly: false, maxAge: TOKEN_TTL_MS });
+}
+
+function clearAuthCookies(res) {
+  res.clearCookie('token', { ...COOKIE_BASE, httpOnly: true });
+  res.clearCookie('csrf', { ...COOKIE_BASE, httpOnly: false });
+}
+
+// Login historically accepted multipart form-data (legacy OAuth2 password
+// flow). multer().none() keeps that working for the new login page too.
 const multer = require('multer');
 const upload = multer();
 
+// Public shape of a user — never leak the password / hash.
+function publicUser(user, role) {
+  return {
+    id: user.id,
+    email: user.email,
+    full_name: user.name,
+    phone: user.phone || null,
+    avatar_url: user.avatar_url || null,
+    is_active: user.is_active !== false,
+    is_superuser: !!user.is_superuser,
+    role: role ? { id: role.id, name: role.name, description: role.description } : null,
+    permissions: role && Array.isArray(role.permissions) ? role.permissions : [],
+    last_login_at: user.last_login_at || null,
+    created_at: user.created_at
+  };
+}
+
 router.post('/login', upload.none(), async (req, res, next) => {
   try {
-    const username = req.body.username;
+    // Accept either "username" (legacy) or "email" as the identifier.
+    const username = req.body.username || req.body.email;
     const password = req.body.password;
 
     if (!username || !password) {
-      return res.status(401).json({ detail: 'Incorrect email or password' });
+      return res.status(400).json({ detail: 'Email and password are required' });
     }
 
-    // In a real migration, we'd use Supabase auth. 
-    // Since we're using a custom table "users" and storing passwords, we check the table.
-    // However, if we migrate to Supabase Auth, we'd use supabase.auth.signInWithPassword.
-    // For now, let's query the custom users table since that's what was created in the migration.
     const { data: user, error } = await supabase
       .from('users')
-      .select('*')
+      .select('*, roles(id, name, description, permissions)')
       .eq('email', username)
-      .single();
+      .maybeSingle();
 
     if (error || !user) {
       return res.status(401).json({ detail: 'Incorrect email or password' });
     }
 
-    // In a real app we'd bcrypt compare. The prompt says "Verify old database data is pushed".
-    // Assuming password matches exactly for simplicity or we'd import bcrypt.
-    // For safety, let's just accept it if the user exists for the purpose of this migration test,
-    // or ideally do a proper check. Let's do a strict equality for now assuming plaintext test data.
-    if (user.password !== password) {
-       // Just for the migration exercise, if password is hashed, we need bcrypt.
-       // The prompt says old backend used passlib[argon2].
-       // This could be an issue if we don't have argon2 in Node.
-       // Since we didn't add argon2, let's just bypass strict password check for the demo,
-       // or we'd install argon2. Let's install argon2 in a bit if we need it.
-       // Wait, the new Supabase migration defined `password text not null`. 
+    if (user.is_active === false) {
+      return res.status(403).json({ detail: 'This account has been disabled' });
     }
 
-    // Create JWT
+    // Password check.
+    //   * If password_hash is set -> use bcrypt (the modern path).
+    //   * Otherwise -> fall back to legacy plaintext compare AND lazily
+    //     migrate that row to bcrypt on success.
+    let ok = false;
+    if (user.password_hash) {
+      try { ok = await bcrypt.compare(password, user.password_hash); } catch { ok = false; }
+    } else if (user.password) {
+      ok = user.password === password;
+      if (ok) {
+        try {
+          const hash = await bcrypt.hash(password, 10);
+          await supabase.from('users').update({ password_hash: hash, password: hash }).eq('id', user.id);
+        } catch (e) {
+          console.error('Lazy password-hash migration failed (non-fatal):', e.message);
+        }
+      }
+    }
+    if (!ok) {
+      return res.status(401).json({ detail: 'Incorrect email or password' });
+    }
+
+    const role = user.roles || null;
+
     const access_token = jwt.sign(
-      { sub: user.id, email: user.email, role: 'User' },
+      {
+        sub: user.id,
+        email: user.email,
+        role: role ? role.name : null,
+        permissions: role && Array.isArray(role.permissions) ? role.permissions : [],
+        is_superuser: !!user.is_superuser
+      },
       env.JWT_SECRET,
       { expiresIn: '8d' }
     );
+
+    // Best-effort: record the login on the user row.
+    try {
+      await supabase.from('users').update({
+        last_login_at: new Date().toISOString(),
+        last_login_ip: req.ip || null
+      }).eq('id', user.id);
+    } catch (e) {
+      console.error('Failed to update last_login_at:', e.message);
+    }
+
+    await createAuditLog({
+      userId: user.id, userName: user.email, action: 'login', module: 'Auth',
+      ipAddress: req.ip, userAgent: req.headers['user-agent'],
+      details: { role: role ? role.name : null }
+    });
+
+    // Set HttpOnly token + CSRF cookies for the cookie-auth path. The
+    // access_token is also returned in the body so the legacy Bearer-header
+    // path keeps working.
+    setAuthCookies(res, access_token);
 
     res.json({
       access_token,
       refresh_token: 'dummy_refresh_token',
       token_type: 'bearer',
-      user: {
-        id: user.id,
-        email: user.email,
-        full_name: user.name,
-        role: 'User',
-        permissions: [],
-        is_superuser: false
-      }
+      user: publicUser(user, role)
     });
   } catch (err) {
     next(err);
@@ -76,28 +150,38 @@ router.get('/me', authenticate, async (req, res, next) => {
   try {
     const { data: user, error } = await supabase
       .from('users')
-      .select('*')
+      .select('*, roles(id, name, description, permissions)')
       .eq('id', req.user.id)
-      .single();
+      .maybeSingle();
 
     if (error || !user) {
       return res.status(404).json({ detail: 'User not found' });
     }
 
-    res.json({
-      id: user.id,
-      email: user.email,
-      full_name: user.name,
-      role: 'User',
-      permissions: [],
-      is_superuser: false
-    });
+    res.json(publicUser(user, user.roles || null));
   } catch (err) {
     next(err);
   }
 });
 
-router.post('/logout', (req, res) => {
+router.post('/logout', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      // Use verify so we don't audit forged-token "logouts" as real users.
+      let decoded = null;
+      try { decoded = jwt.verify(authHeader.split(' ')[1], env.JWT_SECRET); } catch {}
+      if (decoded && decoded.sub) {
+        await createAuditLog({
+          userId: decoded.sub, userName: decoded.email, action: 'logout', module: 'Auth',
+          ipAddress: req.ip, userAgent: req.headers['user-agent']
+        });
+      }
+    }
+  } catch (err) {
+    console.error('Logout audit log failed:', err.message);
+  }
+  clearAuthCookies(res);
   res.json({ message: 'Logged out successfully' });
 });
 

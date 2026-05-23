@@ -4,11 +4,13 @@ dist/
 build/
 .next/
 out/
+# Secrets — never commit any .env file anywhere in the repo.
 .env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+.env.*
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.sample
 
 # Backups and temporary files
 _backup_root_duplicates/

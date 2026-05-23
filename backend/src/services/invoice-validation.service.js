@@ -19,22 +19,23 @@ const validateInvoicePayload = async (payload, context = {}) => {
   } = payload;
 
   // 1. Customer & Vendor Checks
-  if (!customer_id && !vendor_id) {
-    errors.push({ code: 'CUSTOMER_NOT_FOUND', message: 'Either Customer or Vendor is required.' });
-  } else {
-    if (customer_id) {
-      const { data: customer } = await supabase.from('customers').select('id, gst_number').eq('id', customer_id).single();
-      if (!customer) {
-        errors.push({ code: 'CUSTOMER_NOT_FOUND', message: 'Customer does not exist.' });
-      } else if (customer.gst_number && customer.gst_number.length !== 15) {
-        warnings.push({ code: 'INVALID_GST_NUMBER', message: 'Customer GST number format may be invalid (expected 15 chars).' });
-      }
+  // A denormalized customer_name satisfies the requirement on its own;
+  // a linked customer_id / vendor_id is still validated when present.
+  if (!customer_id && !vendor_id && !payload.customer_name) {
+    errors.push({ code: 'CUSTOMER_REQUIRED', message: 'Customer name (or a customer/vendor record) is required.' });
+  }
+  if (customer_id) {
+    const { data: customer } = await supabase.from('customers').select('id, gst_number').eq('id', customer_id).single();
+    if (!customer) {
+      errors.push({ code: 'CUSTOMER_NOT_FOUND', message: 'Customer does not exist.' });
+    } else if (customer.gst_number && customer.gst_number.length !== 15) {
+      warnings.push({ code: 'INVALID_GST_NUMBER', message: 'Customer GST number format may be invalid (expected 15 chars).' });
     }
-    if (vendor_id) {
-      const { data: vendor } = await supabase.from('vendors').select('id, gst_number').eq('id', vendor_id).single();
-      if (!vendor) {
-        errors.push({ code: 'VENDOR_NOT_FOUND', message: 'Vendor does not exist.' });
-      }
+  }
+  if (vendor_id) {
+    const { data: vendor } = await supabase.from('vendors').select('id, gst_number').eq('id', vendor_id).single();
+    if (!vendor) {
+      errors.push({ code: 'VENDOR_NOT_FOUND', message: 'Vendor does not exist.' });
     }
   }
 
@@ -57,6 +58,14 @@ const validateInvoicePayload = async (payload, context = {}) => {
   let calculatedGrandTotal = 0;
   const normalizedItems = [];
 
+  // Batch-load every referenced product in a single query (was N+1 before).
+  const productIds = Array.from(new Set(items.map((it) => it.product_id).filter(Boolean)));
+  const productById = new Map();
+  if (productIds.length > 0) {
+    const { data: products } = await supabase.from('products').select('*').in('id', productIds);
+    for (const p of products || []) productById.set(p.id, p);
+  }
+
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     const qty = parseFloat(item.quantity) || 0;
@@ -71,7 +80,7 @@ const validateInvoicePayload = async (payload, context = {}) => {
     }
 
     if (item.product_id) {
-      const { data: product } = await supabase.from('products').select('*').eq('id', item.product_id).single();
+      const product = productById.get(item.product_id);
       if (!product) {
         errors.push({ code: 'PRODUCT_NOT_FOUND', field: `items[${i}]`, message: 'Product does not exist.' });
       } else {
