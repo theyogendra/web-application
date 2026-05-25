@@ -196,7 +196,14 @@ export default function InvoiceDetailPage() {
       if (res && res.success === false) {
         throw new Error(res.message || "Failed to delete invoice.");
       }
-      router.push("/invoices");
+      if (res?.cascaded?.quotation_number) {
+        setActionMsg(
+          `Invoice ${res.deleted ? "deleted" : "cancelled"}. Linked quotation ${res.cascaded.quotation_number} was also marked rejected.`
+        );
+        setTimeout(() => router.push("/invoices"), 2000);
+      } else {
+        router.push("/invoices");
+      }
     } catch (err: any) {
       flashError(err?.message || "Failed to delete invoice.");
       setBusy(null);

@@ -615,84 +615,47 @@ router.post('/:id/restore-stock', requirePermission('invoices.update'), async (r
 });
 
 // CANCEL INVOICE
+// POST /:id/cancel
+// Atomic via terminate_invoice RPC (phase 11) with allow_hard_delete=false.
+// Stock release + backward cascade happen inside the same Postgres transaction.
 router.post('/:id/cancel', requirePermission('invoices.update'), async (req, res, next) => {
   try {
     const { id } = req.params;
     const userId = req.user ? req.user.id : null;
 
-    const { data: existing, error: existingError } = await supabase
-      .from('invoices')
-      .select('*')
-      .eq('id', id)
-      .single();
-      
-    if (existingError || !existing) return res.status(404).json({ success: false, message: 'Invoice not found' });
-    
-    if (existing.status === 'paid') {
-      return res.status(400).json({ success: false, message: 'Cannot cancel a paid invoice' });
+    const { data: existing } = await supabase.from('invoices').select('*').eq('id', id).maybeSingle();
+    if (!existing) return res.status(404).json({ success: false, message: 'Invoice not found' });
+
+    const { data: result, error: rpcErr } = await supabase.rpc('terminate_invoice', {
+      invoice_id_input: id,
+      user_id_input: userId,
+      allow_hard_delete: false   // /cancel never deletes
+    });
+    if (rpcErr) throw rpcErr;
+    if (!result || !result.success) {
+      return res.status(400).json(result || { success: false, message: 'Cancel failed' });
     }
 
-    // Release / restore any held stock before cancelling. If the RPC returns
-    // a failure jsonb we abort so we don't orphan inventory.
-    if (existing.stock_status === 'reserved' || existing.stock_status === 'reduced') {
-      const rpcName = existing.stock_status === 'reserved'
-        ? 'release_invoice_stock'
-        : 'restore_invoice_stock';
-      const { data: stockResult, error: stockErr } = await supabase
-        .rpc(rpcName, { invoice_id_input: id, user_id_input: userId });
-      if (stockErr) throw stockErr;
-      if (stockResult && stockResult.success === false) {
-        return res.status(409).json({
-          success: false,
-          message: `Cancel aborted: ${stockResult.message || 'stock release failed'}`
-        });
-      }
-    }
-
-    const { data: updated, error: updateError } = await supabase.from('invoices').update({
-      status: 'cancelled',
-      updated_by: userId,
-      updated_at: new Date().toISOString()
-    }).eq('id', id).select().single();
-
-    if (updateError) throw updateError;
-
-    // Backward cascade: if this invoice came from a quotation that's still
-    // 'converted', flip the quotation to 'rejected' so the chain visibly dies.
-    let cascadedQuotation = null;
-    if (existing.converted_from_quotation_id) {
-      const { data: q } = await supabase
-        .from('quotations').select('id, status, quotation_number')
-        .eq('id', existing.converted_from_quotation_id).maybeSingle();
-      if (q && q.status === 'converted') {
-        const { data: cq } = await supabase
-          .from('quotations')
-          .update({
-            status: 'rejected',
-            rejected_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            updated_by: userId
-          })
-          .eq('id', q.id).select().single();
-        cascadedQuotation = cq;
-        await createAuditLog({
-          req, action: 'quotation_cascade_rejected', module: 'Quotations',
-          entityType: 'quotation', entityId: q.id,
-          details: { reason: 'linked invoice cancelled', invoice_id: existing.id }
-        });
-      }
-    }
+    const { data: updated } = await supabase.from('invoices').select('*').eq('id', id).maybeSingle();
+    const cascaded = result.cascaded || null;
 
     await createAuditLog({
-      userId, action: 'invoice_cancelled', entityType: 'invoice', entityId: id, oldData: existing, newData: updated, ipAddress: req.ip,
-      details: cascadedQuotation ? { cascaded_quotation_id: cascadedQuotation.id } : null
+      req, action: 'invoice_cancelled', module: 'Invoices',
+      entityType: 'invoice', entityId: id, oldData: existing, newData: updated,
+      details: cascaded ? {
+        cascaded_quotation_id: cascaded.id,
+        cascaded_quotation_number: cascaded.quotation_number
+      } : null
     });
+    if (cascaded) {
+      await createAuditLog({
+        req, action: 'quotation_cascade_rejected', module: 'Quotations',
+        entityType: 'quotation', entityId: cascaded.id,
+        details: { reason: 'linked invoice cancelled', invoice_id: id, invoice_number: existing.invoice_number }
+      });
+    }
 
-    res.json({
-      success: true,
-      data: updated,
-      cascaded: cascadedQuotation
-    });
+    res.json({ success: true, data: updated, cascaded });
   } catch (err) {
     next(err);
   }
@@ -1030,102 +993,63 @@ router.delete('/:id', requirePermission('invoices.delete'), async (req, res, nex
   try {
     const userId = req.user ? req.user.id : null;
 
-    const { data: existing, error } = await supabase
-      .from('invoices')
-      .select('*, payments(id)')
-      .eq('id', req.params.id)
-      .single();
+    const { data: existing } = await supabase
+      .from('invoices').select('*').eq('id', req.params.id).maybeSingle();
+    if (!existing) return res.status(404).json({ success: false, message: 'Invoice not found' });
 
-    if (error || !existing) return res.status(404).json({ success: false, message: 'Invoice not found' });
-
-    const hasPayments = existing.payments && existing.payments.length > 0;
-
-    if (existing.status === 'paid') {
-      return res.status(400).json({ success: false, message: 'A fully paid invoice cannot be deleted. Issue a credit note instead.' });
-    }
-    if (existing.status === 'cancelled') {
-      return res.status(400).json({ success: false, message: 'Invoice is already cancelled' });
-    }
-
-    // Helper: release/restore held stock, aborting if the RPC reports failure
-    // so we never delete/cancel an invoice while leaving inventory orphaned.
-    async function releaseHeldStock() {
-      if (existing.stock_status !== 'reserved' && existing.stock_status !== 'reduced') return null;
-      const rpcName = existing.stock_status === 'reserved'
-        ? 'release_invoice_stock'
-        : 'restore_invoice_stock';
-      const { data: stockResult, error: stockErr } = await supabase
-        .rpc(rpcName, { invoice_id_input: existing.id, user_id_input: userId });
-      if (stockErr) throw stockErr;
-      if (stockResult && stockResult.success === false) return stockResult.message || 'stock release failed';
-      return null;
+    // Atomic via terminate_invoice RPC (phase 11). The RPC handles:
+    //   * draft + no payments + allow_hard_delete -> DELETE
+    //   * else -> UPDATE status='cancelled'
+    //   * released held stock if any
+    //   * backward cascade upstream quotation 'converted' -> 'rejected'
+    // All in one Postgres transaction.
+    const { data: result, error: rpcErr } = await supabase.rpc('terminate_invoice', {
+      invoice_id_input: req.params.id,
+      user_id_input: userId,
+      allow_hard_delete: true
+    });
+    if (rpcErr) throw rpcErr;
+    if (!result || !result.success) {
+      // RPC returns 'paid' / 'cancelled' / stock-failure messages structured.
+      const code = (result && /aborted/.test(result.message || '')) ? 409 : 400;
+      return res.status(code).json(result || { success: false, message: 'Delete failed' });
     }
 
-    // Backward cascade helper: if this invoice came from a 'converted'
-    // quotation, mark the quotation rejected so the chain visibly dies.
-    async function cascadeQuotationRejection(reason) {
-      if (!existing.converted_from_quotation_id) return null;
-      const { data: q } = await supabase
-        .from('quotations').select('id, status, quotation_number')
-        .eq('id', existing.converted_from_quotation_id).maybeSingle();
-      if (!q || q.status !== 'converted') return null;
-      const { data: cq } = await supabase
-        .from('quotations')
-        .update({
-          status: 'rejected',
-          rejected_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          updated_by: userId
-        })
-        .eq('id', q.id).select().single();
-      await createAuditLog({
-        req, action: 'quotation_cascade_rejected', module: 'Quotations',
-        entityType: 'quotation', entityId: q.id,
-        details: { reason, invoice_id: existing.id }
-      });
-      return cq;
-    }
-
-    if (existing.status === 'draft' && !hasPayments) {
-      const stockErrMsg = await releaseHeldStock();
-      if (stockErrMsg) {
-        return res.status(409).json({ success: false, message: `Delete aborted: ${stockErrMsg}` });
-      }
-      const { error: delErr } = await supabase.from('invoices').delete().eq('id', req.params.id);
-      if (delErr) throw delErr;
-
-      const cascadedQuotation = await cascadeQuotationRejection('linked invoice deleted');
-
-      await createAuditLog({
-        req, action: 'invoice_deleted', module: 'Invoices',
-        entityType: 'invoice', entityId: existing.id, oldData: existing,
-        details: cascadedQuotation ? { cascaded_quotation_id: cascadedQuotation.id } : null
-      });
-      return res.json({ success: true, message: 'Invoice deleted', deleted: true, cascaded: cascadedQuotation });
-    }
-
-    const stockErrMsg = await releaseHeldStock();
-    if (stockErrMsg) {
-      return res.status(409).json({ success: false, message: `Cancel aborted: ${stockErrMsg}` });
-    }
-
-    const { data: updated, error: updErr } = await supabase
-      .from('invoices')
-      .update({ status: 'cancelled', updated_by: userId, updated_at: new Date().toISOString() })
-      .eq('id', req.params.id)
-      .select()
-      .single();
-    if (updErr) throw updErr;
-
-    const cascadedQuotation = await cascadeQuotationRejection('linked invoice cancelled');
+    const cascaded = result.cascaded || null;
+    const updated = result.hard_deleted
+      ? null
+      : (await supabase.from('invoices').select('*').eq('id', req.params.id).maybeSingle()).data;
 
     await createAuditLog({
-      req, action: 'invoice_cancelled', module: 'Invoices',
-      entityType: 'invoice', entityId: existing.id, oldData: existing, newData: updated,
-      details: cascadedQuotation ? { cascaded_quotation_id: cascadedQuotation.id } : null
+      req,
+      action: result.hard_deleted ? 'invoice_deleted' : 'invoice_cancelled',
+      module: 'Invoices',
+      entityType: 'invoice', entityId: existing.id,
+      oldData: existing, newData: updated,
+      details: cascaded ? {
+        cascaded_quotation_id: cascaded.id,
+        cascaded_quotation_number: cascaded.quotation_number
+      } : null
     });
+    if (cascaded) {
+      await createAuditLog({
+        req, action: 'quotation_cascade_rejected', module: 'Quotations',
+        entityType: 'quotation', entityId: cascaded.id,
+        details: {
+          reason: result.hard_deleted ? 'linked invoice deleted' : 'linked invoice cancelled',
+          invoice_id: existing.id,
+          invoice_number: existing.invoice_number
+        }
+      });
+    }
 
-    res.json({ success: true, message: 'Invoice cancelled', data: updated, deleted: false, cascaded: cascadedQuotation });
+    res.json({
+      success: true,
+      message: result.hard_deleted ? 'Invoice deleted' : 'Invoice cancelled',
+      data: updated,
+      deleted: result.hard_deleted,
+      cascaded
+    });
   } catch (err) {
     next(err);
   }

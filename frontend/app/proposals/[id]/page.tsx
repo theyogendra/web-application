@@ -149,7 +149,17 @@ export default function ProposalDetailPage() {
       if (res && res.success === false) {
         throw new Error(res.message || `Failed to ${verb} proposal.`);
       }
-      router.push("/proposals");
+      // Cascade: if a linked quotation was rejected, surface it inline
+      // before navigating away so the user understands the chain.
+      if (res?.cascaded?.quotation_number) {
+        setActionMsg(
+          `Proposal ${verb}ed. Linked quotation ${res.cascaded.quotation_number} was also marked rejected.`
+        );
+        // Brief delay so the message is visible before the redirect.
+        setTimeout(() => router.push("/proposals"), 2000);
+      } else {
+        router.push("/proposals");
+      }
     } catch (err: any) {
       flashError(err?.message || `Failed to ${verb} proposal.`);
       setBusy(null);

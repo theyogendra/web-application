@@ -139,6 +139,12 @@ export default function QuotationDetailPage() {
         flash(
           `Quotation accepted; draft invoice ${inv.invoice_number || ""} created.`,
         );
+      } else if (action === "rejected" && res?.cascaded?.proposal_number) {
+        // Backward cascade: linked proposal was also marked rejected.
+        setCreatedInvoice(null);
+        flash(
+          `Quotation rejected. Linked proposal ${res.cascaded.proposal_number} was also marked rejected.`
+        );
       } else {
         setCreatedInvoice(null);
         flash(`Marked ${action}.`);
@@ -167,7 +173,14 @@ export default function QuotationDetailPage() {
       if (res && res.success === false) {
         throw new Error(res.message || `Failed to ${verb} quotation.`);
       }
-      router.push("/quotations");
+      if (res?.cascaded?.proposal_number) {
+        setActionMsg(
+          `Quotation ${verb}ed. Linked proposal ${res.cascaded.proposal_number} was also marked rejected.`
+        );
+        setTimeout(() => router.push("/quotations"), 2000);
+      } else {
+        router.push("/quotations");
+      }
     } catch (err: any) {
       flashError(err?.message || `Failed to ${verb} quotation.`);
       setBusy(null);

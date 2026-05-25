@@ -184,68 +184,63 @@ router.put('/:id', requirePermission('proposals.update'), async (req, res, next)
   }
 });
 
-// DELETE /proposals/:id  -- drafts hard-delete; converted/sent get cancelled.
-// Forward cascade: if there's a linked quotation in a non-terminal state,
-// it's automatically rejected so the chain visibly ends.
+// DELETE /proposals/:id
+// Atomic via terminate_proposal RPC (phase 11): drafts are hard-deleted,
+// everything else is cancelled. Linked quotation in open state is cascade-
+// rejected in the same Postgres transaction.
 router.delete('/:id', requirePermission('proposals.delete'), async (req, res, next) => {
   try {
     const userId = req.user ? req.user.id : null;
     const { data: existing } = await supabase.from('proposals').select('*').eq('id', req.params.id).maybeSingle();
     if (!existing) return res.status(404).json({ success: false, message: 'Proposal not found' });
 
-    let cascadedQuotation = null;
-    // Cascade FORWARD: kill the linked quotation if it's still open.
-    if (existing.converted_to_quotation_id) {
-      const { data: linkedQ } = await supabase
-        .from('quotations').select('id, status, quotation_number')
-        .eq('id', existing.converted_to_quotation_id).maybeSingle();
-      if (linkedQ && ['draft', 'sent'].includes(linkedQ.status)) {
-        const { data: rq } = await supabase
-          .from('quotations')
-          .update({
-            status: 'rejected',
-            rejected_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            updated_by: userId
-          })
-          .eq('id', linkedQ.id).select().single();
-        cascadedQuotation = rq;
-        await createAuditLog({
-          req, action: 'quotation_cascade_rejected', module: 'Quotations',
-          entityType: 'quotation', entityId: linkedQ.id,
-          details: { reason: 'parent proposal deleted/cancelled', proposal_id: existing.id }
-        });
-      }
-    }
-
-    if (existing.status === 'draft') {
-      const { error } = await supabase.from('proposals').delete().eq('id', req.params.id);
-      if (error) throw error;
-      await createAuditLog({
-        req, action: 'proposal_deleted', module: 'Proposals',
-        entityType: 'proposal', entityId: existing.id, oldData: existing
-      });
-      return res.json({ success: true, message: 'Proposal deleted', deleted: true, cascaded: cascadedQuotation });
-    }
-
-    const { data: row, error } = await supabase
-      .from('proposals').update({
-        status: 'cancelled',
-        rejected_at: existing.rejected_at || new Date().toISOString(),
-        updated_by: userId,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', req.params.id).select().single();
-    if (error) throw error;
-
-    await createAuditLog({
-      req, action: 'proposal_cancelled', module: 'Proposals',
-      entityType: 'proposal', entityId: existing.id, oldData: existing, newData: row,
-      details: cascadedQuotation
-        ? { cascaded_quotation_id: cascadedQuotation.id, cascaded_quotation_number: cascadedQuotation.quotation_number }
-        : null
+    const { data: result, error: rpcErr } = await supabase.rpc('terminate_proposal', {
+      proposal_id_input: req.params.id,
+      user_id_input: userId
     });
-    res.json({ success: true, message: 'Proposal cancelled', data: row, deleted: false, cascaded: cascadedQuotation });
+    if (rpcErr) throw rpcErr;
+    if (!result || !result.success) {
+      return res.status(400).json(result || { success: false, message: 'Terminate failed' });
+    }
+
+    const cascaded = result.cascaded || null;
+    const updated = result.hard_deleted
+      ? null
+      : (await supabase.from('proposals').select('*').eq('id', req.params.id).maybeSingle()).data;
+
+    // Audit: primary action
+    await createAuditLog({
+      req,
+      action: result.hard_deleted ? 'proposal_deleted' : 'proposal_cancelled',
+      module: 'Proposals',
+      entityType: 'proposal', entityId: existing.id,
+      oldData: existing, newData: updated,
+      details: cascaded ? {
+        cascaded_quotation_id: cascaded.id,
+        cascaded_quotation_number: cascaded.quotation_number
+      } : null
+    });
+
+    // Audit: cascade target (so quotation history shows why it died)
+    if (cascaded) {
+      await createAuditLog({
+        req, action: 'quotation_cascade_rejected', module: 'Quotations',
+        entityType: 'quotation', entityId: cascaded.id,
+        details: {
+          reason: result.hard_deleted ? 'parent proposal deleted' : 'parent proposal cancelled',
+          proposal_id: existing.id,
+          proposal_number: existing.proposal_number
+        }
+      });
+    }
+
+    res.json({
+      success: true,
+      message: result.hard_deleted ? 'Proposal deleted' : 'Proposal cancelled',
+      data: updated,
+      deleted: result.hard_deleted,
+      cascaded
+    });
   } catch (err) {
     next(err);
   }
