@@ -28,13 +28,29 @@ CREATE TABLE IF NOT EXISTS public.user_module_access (
 CREATE INDEX IF NOT EXISTS idx_user_module_access_user ON public.user_module_access(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_module_access_module ON public.user_module_access(module);
 
-ALTER TABLE public.user_module_access
-  ADD CONSTRAINT IF NOT EXISTS user_module_access_module_chk
-  CHECK (module IN ('inventory','proposals','quotations','invoices','payments'));
+-- Idempotent ADD CONSTRAINT via DO blocks (Postgres < 17 doesn't support
+-- IF NOT EXISTS on ADD CONSTRAINT directly).
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'user_module_access_module_chk'
+  ) THEN
+    ALTER TABLE public.user_module_access
+      ADD CONSTRAINT user_module_access_module_chk
+      CHECK (module IN ('inventory','proposals','quotations','invoices','payments'));
+  END IF;
+END $$;
 
-ALTER TABLE public.user_module_access
-  ADD CONSTRAINT IF NOT EXISTS user_module_access_level_chk
-  CHECK (access_level IN ('view','edit'));
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'user_module_access_level_chk'
+  ) THEN
+    ALTER TABLE public.user_module_access
+      ADD CONSTRAINT user_module_access_level_chk
+      CHECK (access_level IN ('view','edit'));
+  END IF;
+END $$;
 
 -- ============================================================
 -- Refresh role permissions for the new flow
