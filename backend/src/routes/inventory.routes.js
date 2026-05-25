@@ -27,20 +27,37 @@ router.get('/', async (req, res, next) => {
     if (error) throw error;
 
     let rows = data || [];
-    // low_stock is a derived filter; cheaper to do client-side than in PostgREST.
+
+    // Low-stock / out-of-stock derivation. A product needs attention if:
+    //   * stock <= 0  (out of stock; always flagged regardless of threshold)
+    //   * OR stock <= reorder_level (when a threshold is set > 0)
+    //
+    // The previous version required reorder_level > 0 in both branches, so
+    // out-of-stock items with no threshold set were silently invisible.
+    const flag = (p) => {
+      const stock = Number(p.stock) || 0;
+      const reorder = Number(p.reorder_level) || 0;
+      const outOfStock = stock <= 0;
+      const lowStock = reorder > 0 && stock <= reorder;
+      return { outOfStock, lowStock, needsAttention: outOfStock || lowStock };
+    };
+
     if (low_stock === 'true') {
-      rows = rows.filter((p) =>
-        (p.reorder_level || 0) > 0 && (p.stock || 0) <= (p.reorder_level || 0)
-      );
+      rows = rows.filter((p) => flag(p).needsAttention);
     }
 
     res.json({
       success: true,
-      data: rows.map((p) => ({
-        ...p,
-        low_stock:
-          (p.reorder_level || 0) > 0 && (p.stock || 0) <= (p.reorder_level || 0)
-      }))
+      data: rows.map((p) => {
+        const f = flag(p);
+        return {
+          ...p,
+          // Kept for backward compat; old UI calls render this name.
+          low_stock: f.needsAttention,
+          out_of_stock: f.outOfStock,
+          stock_status: f.outOfStock ? 'out_of_stock' : f.lowStock ? 'low' : 'ok'
+        };
+      })
     });
   } catch (err) {
     next(err);

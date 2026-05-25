@@ -187,10 +187,16 @@ async function getInventoryReport() {
   );
   const totalUnits = active.reduce((s, p) => s + (Number(p.stock) || 0), 0);
 
-  const lowStock = active.filter(
-    (p) => (p.reorder_level || 0) > 0 && (p.stock || 0) <= (p.reorder_level || 0)
-  );
+  // Definition: "needs attention" = out of stock OR at/below reorder threshold.
+  // Out-of-stock is always flagged regardless of whether a reorder level was set.
   const outOfStock = active.filter((p) => (Number(p.stock) || 0) <= 0);
+  const lowStockOnly = active.filter((p) => {
+    const stock = Number(p.stock) || 0;
+    const reorder = Number(p.reorder_level) || 0;
+    return stock > 0 && reorder > 0 && stock <= reorder;
+  });
+  // Combined alert list = out-of-stock first (most urgent), then below-reorder.
+  const lowStock = [...outOfStock, ...lowStockOnly];
 
   // By category
   const byCat = {};

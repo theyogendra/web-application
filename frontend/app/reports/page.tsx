@@ -637,29 +637,58 @@ export default function ReportsPage() {
               <EmptyState message="No low-stock items 🎉" />
             ) : (
               <div className="space-y-2">
-                {inventory.low_stock_products.map((p: any) => (
-                  <div
-                    key={p.id}
-                    className="flex items-center justify-between rounded-lg border border-[#FF3B30]/15 bg-[#FF3B30]/4 px-3 py-2"
-                  >
-                    <div className="min-w-0">
-                      <p className="truncate text-[13px] font-medium text-[var(--text-primary)]">
-                        {p.name}
-                      </p>
-                      <p className="text-[11px] text-[var(--text-tertiary)]">
-                        {p.sku || "—"}
-                      </p>
+                {inventory.low_stock_products.map((p: any) => {
+                  const stock = Number(p.stock) || 0;
+                  const reorder = Number(p.reorder_level) || 0;
+                  const out = stock <= 0;
+                  const tone = out
+                    ? {
+                        border: "border-[#FF3B30]/20",
+                        bg: "bg-[#FF3B30]/6",
+                        text: "text-[#C20F0F] dark:text-[#FF453A]",
+                        chip:
+                          "bg-[#FF3B30]/15 text-[#C20F0F] dark:bg-[#FF453A]/25 dark:text-[#FF453A]",
+                        chipLabel: "Out of stock",
+                      }
+                    : {
+                        border: "border-[#FF9500]/20",
+                        bg: "bg-[#FF9500]/6",
+                        text: "text-[#C77800] dark:text-[#FF9F0A]",
+                        chip:
+                          "bg-[#FF9500]/15 text-[#C77800] dark:bg-[#FF9F0A]/25 dark:text-[#FF9F0A]",
+                        chipLabel: "Low",
+                      };
+                  return (
+                    <div
+                      key={p.id}
+                      className={`flex items-center justify-between rounded-lg border ${tone.border} ${tone.bg} px-3 py-2`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="truncate text-[13px] font-medium text-[var(--text-primary)]">
+                            {p.name}
+                          </p>
+                          <span
+                            className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${tone.chip}`}
+                          >
+                            {tone.chipLabel}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-[var(--text-tertiary)]">
+                          {p.sku || "—"}
+                        </p>
+                      </div>
+                      <div className="ml-3 text-right">
+                        <p className={`text-[13px] font-semibold ${tone.text}`}>
+                          {stock} {p.unit || "left"}
+                        </p>
+                        <p className="text-[11px] text-[var(--text-tertiary)]">
+                          {reorder > 0 ? `Reorder at ${reorder}` : "No threshold set"}
+                        </p>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-[13px] font-semibold text-[#C20F0F] dark:text-[#FF453A]">
-                        {p.stock} {p.unit || "left"}
-                      </p>
-                      <p className="text-[11px] text-[var(--text-tertiary)]">
-                        Reorder at {p.reorder_level}
-                      </p>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </Card>

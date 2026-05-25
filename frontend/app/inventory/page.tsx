@@ -200,13 +200,17 @@ export default function InventoryPage() {
                     </td>
                     <td
                       className={`px-4 py-3 text-right font-medium ${
-                        p.low_stock ? "text-red-600" : "text-gray-900"
+                        p.out_of_stock || p.low_stock ? "text-red-600" : "text-gray-900"
                       }`}
                     >
                       <span className="inline-flex items-center gap-2">
                         {p.stock}
-                        {p.low_stock ? (
+                        {p.out_of_stock ? (
                           <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-700">
+                            Out
+                          </span>
+                        ) : p.low_stock ? (
+                          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700">
                             Low
                           </span>
                         ) : null}

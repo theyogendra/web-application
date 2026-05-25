@@ -251,7 +251,10 @@ export default function ProductForm({
               onChange={(e) => setField("stock", e.target.value)}
             />
           </Field>
-          <Field label="Reorder level">
+          <Field
+            label="Reorder level"
+            hint="When stock falls at or below this, the product shows in Low Stock alerts. Out-of-stock items (stock = 0) are always flagged."
+          >
             <TextInput
               type="number"
               min="0"
