@@ -13,6 +13,7 @@ import { formatCurrency, formatDate } from "@/lib/format";
 import { computeLineTotal } from "@/lib/totals";
 import { canEdit as canEditModule } from "@/lib/auth";
 import StatusBadge from "@/components/StatusBadge";
+import DocumentChain from "@/components/DocumentChain";
 import {
   Button,
   Card,
@@ -270,6 +271,33 @@ export default function ProposalDetailPage() {
               </Button>
             ) : null}
           </>
+        }
+      />
+
+      <DocumentChain
+        currentType="proposal"
+        proposal={{
+          id: proposal.id,
+          number: proposal.proposal_number,
+          status: proposal.status,
+        }}
+        quotation={
+          proposal.quotations
+            ? {
+                id: proposal.quotations.id,
+                number: proposal.quotations.quotation_number,
+                status: proposal.quotations.status,
+              }
+            : null
+        }
+        invoice={
+          proposal.quotations && proposal.quotations.invoices
+            ? {
+                id: proposal.quotations.invoices.id,
+                number: proposal.quotations.invoices.invoice_number,
+                status: proposal.quotations.invoices.status,
+              }
+            : null
         }
       />
 

@@ -21,10 +21,12 @@ import {
   TrendingUp,
   CircleDollarSign,
   ReceiptText,
-  Clock,
   AlertTriangle,
   Download,
   FileSpreadsheet,
+  Package,
+  PackageX,
+  Boxes,
 } from "lucide-react";
 import { apiGet, downloadFile } from "@/lib/api";
 import { formatCurrency, titleCase } from "@/lib/format";
@@ -76,6 +78,7 @@ export default function ReportsPage() {
   const [paymentsRep, setPaymentsRep] = useState<any>(null);
   const [customers, setCustomers] = useState<any[]>([]);
   const [tax, setTax] = useState<any>(null);
+  const [inventory, setInventory] = useState<any>(null);
 
   async function load() {
     setLoading(true);
@@ -88,6 +91,7 @@ export default function ReportsPage() {
         apiGet("/reports/payments"),
         apiGet("/reports/customers"),
         apiGet("/reports/tax"),
+        apiGet("/reports/inventory"),
       ]);
       const get = (i: number) =>
         results[i].status === "fulfilled"
@@ -105,6 +109,7 @@ export default function ReportsPage() {
       const cust = get(4)?.data;
       setCustomers(Array.isArray(cust) ? cust : []);
       setTax(get(5)?.data || null);
+      setInventory(get(6)?.data || null);
     } catch (err: any) {
       setError(err?.message || "Failed to load reports.");
     } finally {
@@ -391,35 +396,62 @@ export default function ReportsPage() {
             {methodData.length === 0 ? (
               <EmptyState message="No payment data yet." />
             ) : (
-              <div className="h-[260px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={methodData} margin={{ top: 10, right: 8, bottom: 0, left: 0 }}>
-                    <CartesianGrid stroke="var(--separator-soft)" vertical={false} />
-                    <XAxis
-                      dataKey="name"
-                      tick={{ fill: "var(--text-tertiary)", fontSize: 11 }}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <YAxis
-                      tick={{ fill: "var(--text-tertiary)", fontSize: 11 }}
-                      axisLine={false}
-                      tickLine={false}
-                      tickFormatter={(v) => "₹" + (v >= 1000 ? (v / 1000).toFixed(0) + "k" : v)}
-                      width={48}
-                    />
-                    <Tooltip
-                      contentStyle={tooltipStyle()}
-                      formatter={(v: any) => formatCurrency(v)}
-                    />
-                    <Bar dataKey="amount" radius={[6, 6, 0, 0]} animationDuration={700}>
-                      {methodData.map((entry: any, idx: number) => (
-                        <Cell key={idx} fill={entry.color} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+              (() => {
+                const total = methodData.reduce(
+                  (s: number, m: any) => s + (Number(m.amount) || 0),
+                  0
+                );
+                return (
+                  <div className="space-y-3">
+                    {methodData.map((m: any) => {
+                      const pct = total > 0 ? (Number(m.amount) / total) * 100 : 0;
+                      return (
+                        <div key={m.name} className="rounded-lg border border-[var(--separator-soft)] bg-[var(--bg-subtle)] px-3.5 py-3">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2.5">
+                              <span
+                                className="h-2.5 w-2.5 shrink-0 rounded-full"
+                                style={{ background: m.color }}
+                              />
+                              <span className="text-[13.5px] font-medium text-[var(--text-primary)]">
+                                {m.name}
+                              </span>
+                              <span className="ml-1 rounded-full bg-[var(--bg-surface)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-tertiary)] border border-[var(--separator-soft)]">
+                                {m.count} {m.count === 1 ? "txn" : "txns"}
+                              </span>
+                            </div>
+                            <div className="text-right">
+                              <p className="financial text-[14px] font-semibold text-[var(--text-primary)]">
+                                {formatCurrency(m.amount)}
+                              </p>
+                              <p className="text-[11px] text-[var(--text-tertiary)]">
+                                {pct.toFixed(1)}% of total
+                              </p>
+                            </div>
+                          </div>
+                          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--bg-surface)]">
+                            <motion.div
+                              className="h-full rounded-full"
+                              style={{ background: m.color }}
+                              initial={{ width: 0 }}
+                              animate={{ width: `${pct}%` }}
+                              transition={{ duration: 0.6, ease: "easeOut" }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <div className="flex items-center justify-between border-t border-[var(--separator-soft)] pt-3">
+                      <span className="text-[12px] uppercase tracking-wide text-[var(--text-tertiary)]">
+                        Total collected
+                      </span>
+                      <span className="financial text-[15px] font-semibold text-[var(--text-primary)]">
+                        {formatCurrency(total)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })()
             )}
           </Card>
         </motion.div>
@@ -473,6 +505,163 @@ export default function ReportsPage() {
                 <EmptyState message="No aging data yet." />
               )}
             </div>
+          </Card>
+        </motion.div>
+      </div>
+
+      {/* Inventory snapshot */}
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <StatCard
+          label="Stock value"
+          value={formatCurrency(inventory?.stock_value_cost)}
+          deltaSuffix="at cost"
+          accent="blue"
+          icon={<Boxes size={18} />}
+        />
+        <StatCard
+          label="Retail value"
+          value={formatCurrency(inventory?.stock_value_retail)}
+          deltaSuffix="at selling price"
+          accent="violet"
+          icon={<CircleDollarSign size={18} />}
+        />
+        <StatCard
+          label="Active products"
+          value={String(inventory?.active_count ?? 0)}
+          deltaSuffix={`${inventory?.total_units ?? 0} total units`}
+          accent="green"
+          icon={<Package size={18} />}
+        />
+        <StatCard
+          label="Low stock"
+          value={String(inventory?.low_stock_count ?? 0)}
+          invertDelta
+          deltaSuffix={`${inventory?.out_of_stock_count ?? 0} out of stock`}
+          accent={inventory?.low_stock_count > 0 ? "red" : "neutral"}
+          icon={<PackageX size={18} />}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        {/* By category */}
+        <motion.div
+          className="lg:col-span-2"
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.22 }}
+        >
+          <Card className="p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
+                  Inventory by category
+                </h2>
+                <p className="mt-0.5 text-[12.5px] text-[var(--text-tertiary)]">
+                  Stock value distribution
+                </p>
+              </div>
+            </div>
+            {!inventory || (inventory.categories || []).length === 0 ? (
+              <EmptyState message="No inventory data yet." />
+            ) : (
+              (() => {
+                const cats = inventory.categories || [];
+                const max = Math.max(...cats.map((c: any) => Number(c.value) || 0), 1);
+                return (
+                  <div className="space-y-3">
+                    {cats.map((c: any, i: number) => {
+                      const pct = ((Number(c.value) || 0) / max) * 100;
+                      return (
+                        <div key={c.category}>
+                          <div className="mb-1 flex items-center justify-between text-[13px]">
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium text-[var(--text-primary)]">
+                                {c.category}
+                              </span>
+                              <span className="rounded-full bg-[var(--bg-subtle)] px-1.5 py-0.5 text-[11px] text-[var(--text-tertiary)]">
+                                {c.count} {c.count === 1 ? "item" : "items"}
+                              </span>
+                              <span className="text-[11px] text-[var(--text-tertiary)]">
+                                {c.units} units
+                              </span>
+                            </div>
+                            <span className="financial font-semibold text-[var(--text-primary)]">
+                              {formatCurrency(c.value)}
+                            </span>
+                          </div>
+                          <div className="h-1.5 overflow-hidden rounded-full bg-[var(--bg-subtle)]">
+                            <motion.div
+                              className="h-full rounded-full"
+                              style={{
+                                background:
+                                  ["#0A84FF", "#34C759", "#AF52DE", "#FF9500", "#FF2D55", "#5AC8FA"][i % 6],
+                              }}
+                              initial={{ width: 0 }}
+                              animate={{ width: `${pct}%` }}
+                              transition={{ duration: 0.6, ease: "easeOut" }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()
+            )}
+          </Card>
+        </motion.div>
+
+        {/* Low stock alert */}
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.24 }}
+        >
+          <Card className="p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
+                  Low stock
+                </h2>
+                <p className="mt-0.5 text-[12.5px] text-[var(--text-tertiary)]">
+                  At or below reorder level
+                </p>
+              </div>
+              {inventory?.low_stock_count > 0 ? (
+                <span className="rounded-full bg-[#FF3B30]/12 px-2 py-0.5 text-[11px] font-medium text-[#C20F0F] dark:bg-[#FF453A]/20 dark:text-[#FF453A]">
+                  {inventory.low_stock_count} alert{inventory.low_stock_count > 1 ? "s" : ""}
+                </span>
+              ) : null}
+            </div>
+            {!inventory || (inventory.low_stock_products || []).length === 0 ? (
+              <EmptyState message="No low-stock items 🎉" />
+            ) : (
+              <div className="space-y-2">
+                {inventory.low_stock_products.map((p: any) => (
+                  <div
+                    key={p.id}
+                    className="flex items-center justify-between rounded-lg border border-[#FF3B30]/15 bg-[#FF3B30]/4 px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-[13px] font-medium text-[var(--text-primary)]">
+                        {p.name}
+                      </p>
+                      <p className="text-[11px] text-[var(--text-tertiary)]">
+                        {p.sku || "—"}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[13px] font-semibold text-[#C20F0F] dark:text-[#FF453A]">
+                        {p.stock} {p.unit || "left"}
+                      </p>
+                      <p className="text-[11px] text-[var(--text-tertiary)]">
+                        Reorder at {p.reorder_level}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </Card>
         </motion.div>
       </div>

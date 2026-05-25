@@ -16,6 +16,7 @@ import {
 import { computeLineTotal } from "@/lib/totals";
 import { canEdit as canEditModule } from "@/lib/auth";
 import StatusBadge from "@/components/StatusBadge";
+import DocumentChain from "@/components/DocumentChain";
 import {
   Button,
   Card,
@@ -292,6 +293,33 @@ export default function QuotationDetailPage() {
               </Button>
             ) : null}
           </>
+        }
+      />
+
+      <DocumentChain
+        currentType="quotation"
+        proposal={
+          quotation.proposals
+            ? {
+                id: quotation.proposals.id,
+                number: quotation.proposals.proposal_number,
+                status: quotation.proposals.status,
+              }
+            : null
+        }
+        quotation={{
+          id: quotation.id,
+          number: quotation.quotation_number,
+          status: quotation.status,
+        }}
+        invoice={
+          quotation.invoices
+            ? {
+                id: quotation.invoices.id,
+                number: quotation.invoices.invoice_number,
+                status: quotation.invoices.status,
+              }
+            : null
         }
       />
 

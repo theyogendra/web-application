@@ -18,6 +18,7 @@ import {
 import { computeLineTotal } from "@/lib/totals";
 import { canEdit as canEditModule } from "@/lib/auth";
 import StatusBadge from "@/components/StatusBadge";
+import DocumentChain from "@/components/DocumentChain";
 import {
   Button,
   Card,
@@ -298,6 +299,33 @@ export default function InvoiceDetailPage() {
             ) : null}
           </>
         }
+      />
+
+      <DocumentChain
+        currentType="invoice"
+        proposal={
+          invoice.quotations && invoice.quotations.proposals
+            ? {
+                id: invoice.quotations.proposals.id,
+                number: invoice.quotations.proposals.proposal_number,
+                status: invoice.quotations.proposals.status,
+              }
+            : null
+        }
+        quotation={
+          invoice.quotations
+            ? {
+                id: invoice.quotations.id,
+                number: invoice.quotations.quotation_number,
+                status: invoice.quotations.status,
+              }
+            : null
+        }
+        invoice={{
+          id: invoice.id,
+          number: invoice.invoice_number,
+          status: invoice.status,
+        }}
       />
 
       {actionMsg ? (

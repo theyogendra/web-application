@@ -70,19 +70,19 @@ export default function Sidebar() {
       className="relative flex shrink-0 flex-col border-r border-[var(--separator-soft)] bg-[var(--bg-surface)] dark:bg-[#1C1C1E]"
     >
       {/* Brand */}
-      <div className="flex h-16 items-center px-4">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-[#0A84FF] to-[#0071E3] text-[13px] font-bold text-white shadow-sm">
+      <div className="flex h-[68px] items-center px-4 py-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#0A84FF] to-[#0071E3] text-[15px] font-bold text-white shadow-soft">
           IP
         </div>
         {!collapsed && (
-          <span className="ml-2.5 text-[15px] font-semibold tracking-tight text-[var(--text-primary)]">
+          <span className="ml-3 text-[17px] font-semibold tracking-tight text-[var(--text-primary)]">
             InvoicePro
           </span>
         )}
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 space-y-0.5 px-2 pb-3">
+      <nav className="flex-1 space-y-1 px-3 pb-3 pt-1">
         {visibleNav.map((item) => {
           const Icon = item.icon;
           const active =
@@ -93,16 +93,16 @@ export default function Sidebar() {
               href={item.href}
               title={collapsed ? item.label : undefined}
               className={[
-                "group relative flex items-center gap-3 rounded-lg px-3 py-2 text-[13.5px] font-medium transition-all duration-150",
+                "group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-[14px] font-medium transition-all duration-150",
                 active
                   ? "bg-[var(--bg-subtle)] text-[var(--text-primary)] dark:bg-[#2C2C2E]"
                   : "text-[var(--text-secondary)] hover:bg-[var(--bg-subtle)] hover:text-[var(--text-primary)] dark:hover:bg-[#2C2C2E]",
                 collapsed ? "justify-center" : "",
               ].join(" ")}
             >
-              {/* Active indicator bar */}
+              {/* Active indicator rail */}
               {active && (
-                <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-[#0071E3]" />
+                <span className="absolute left-0 top-1/2 h-6 w-[3px] -translate-y-1/2 rounded-r-full bg-[#0071E3]" />
               )}
               <Icon
                 size={18}

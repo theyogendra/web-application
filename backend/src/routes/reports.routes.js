@@ -33,11 +33,15 @@ router.get('/summary', async (req, res, next) => {
   }
 });
 
+// Note: the dashboard fires /summary AND every panel endpoint below on a
+// single page load. We only audit /summary (one row per dashboard view) and
+// /export (real user intent). Logging every panel call was spamming
+// audit_logs with 6 identical entries per render.
+
 // GET /reports/revenue  -- total + monthly revenue
 router.get('/revenue', async (req, res, next) => {
   try {
     const data = await reports.getRevenueReport(parseFilters(req.query));
-    await logView(req, 'revenue');
     res.json({ success: true, data });
   } catch (err) {
     next(err);
@@ -48,7 +52,6 @@ router.get('/revenue', async (req, res, next) => {
 router.get('/invoices', async (req, res, next) => {
   try {
     const data = await reports.getInvoiceReport(parseFilters(req.query));
-    await logView(req, 'invoices');
     res.json({ success: true, data });
   } catch (err) {
     next(err);
@@ -59,7 +62,6 @@ router.get('/invoices', async (req, res, next) => {
 router.get('/payments', async (req, res, next) => {
   try {
     const data = await reports.getPaymentReport(parseFilters(req.query));
-    await logView(req, 'payments');
     res.json({ success: true, data });
   } catch (err) {
     next(err);
@@ -70,7 +72,6 @@ router.get('/payments', async (req, res, next) => {
 router.get('/customers', async (req, res, next) => {
   try {
     const data = await reports.getCustomerRevenue(parseFilters(req.query));
-    await logView(req, 'customers');
     res.json({ success: true, data });
   } catch (err) {
     next(err);
@@ -81,7 +82,16 @@ router.get('/customers', async (req, res, next) => {
 router.get('/tax', async (req, res, next) => {
   try {
     const data = await reports.getTaxSummary(parseFilters(req.query));
-    await logView(req, 'tax');
+    res.json({ success: true, data });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /reports/inventory  -- stock value, low-stock count, by-category
+router.get('/inventory', async (req, res, next) => {
+  try {
+    const data = await reports.getInventoryReport(parseFilters(req.query));
     res.json({ success: true, data });
   } catch (err) {
     next(err);

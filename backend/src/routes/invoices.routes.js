@@ -47,7 +47,7 @@ router.get('/:id', async (req, res, next) => {
   try {
     const { data, error } = await supabase
       .from('invoices')
-      .select('*, invoice_items(*), payments(*), customers(name, email, billing_address, gst_number), vendors(name, email, billing_address, gst_number)')
+      .select('*, invoice_items(*), payments(*), customers(name, email, billing_address, gst_number), vendors(name, email, billing_address, gst_number), quotations!converted_from_quotation_id(id, quotation_number, status, proposals!converted_from_proposal_id(id, proposal_number, status))')
       .eq('id', req.params.id)
       .single();
 

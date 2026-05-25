@@ -12,7 +12,7 @@ const { sanitizeSearch } = require('../utils/escape');
 router.use(optionalAuth);
 
 const SELECT_LIST = '*';
-const SELECT_FULL = '*, proposal_items(*), quotations!converted_to_quotation_id(id,quotation_number,status)';
+const SELECT_FULL = '*, proposal_items(*), quotations!converted_to_quotation_id(id, quotation_number, status, invoices!converted_to_invoice_id(id, invoice_number, status))';
 
 const todayIso = () => new Date().toISOString().slice(0, 10);
 
