@@ -2,7 +2,8 @@
 
 import React from "react";
 
-// Small shared UI primitives.
+// Shared UI primitives — Apple/Microsoft-inspired:
+// pure surfaces, minimal borders, soft shadow, generous radii.
 
 export function PageHeader({
   title,
@@ -14,13 +15,15 @@ export function PageHeader({
   actions?: React.ReactNode;
 }) {
   return (
-    <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+    <div className="mb-7 flex flex-wrap items-end justify-between gap-3 animate-fade-in">
       <div>
-        <h1 className="text-[26px] font-semibold tracking-tight text-ink-900">
+        <h1 className="text-[28px] font-semibold text-[var(--text-primary)] leading-tight">
           {title}
         </h1>
         {description ? (
-          <p className="mt-1 text-sm text-ink-500">{description}</p>
+          <p className="mt-1.5 text-[15px] text-[var(--text-secondary)]">
+            {description}
+          </p>
         ) : null}
       </div>
       {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
@@ -31,13 +34,19 @@ export function PageHeader({
 export function Card({
   children,
   className = "",
+  hover = false,
 }: {
   children: React.ReactNode;
   className?: string;
+  hover?: boolean;
 }) {
   return (
     <div
-      className={`rounded-xl border border-ink-200 bg-white shadow-card ${className}`}
+      className={[
+        "surface rounded-2xl border border-[var(--separator-soft)] shadow-card",
+        hover ? "lift hover:shadow-soft" : "",
+        className,
+      ].join(" ")}
     >
       {children}
     </div>
@@ -47,6 +56,7 @@ export function Card({
 export function Button({
   children,
   variant = "primary",
+  size = "md",
   type = "button",
   disabled,
   onClick,
@@ -54,29 +64,34 @@ export function Button({
 }: {
   children: React.ReactNode;
   variant?: "primary" | "secondary" | "danger" | "ghost";
+  size?: "sm" | "md";
   type?: "button" | "submit";
   disabled?: boolean;
   onClick?: () => void;
   className?: string;
 }) {
   const base =
-    "inline-flex items-center justify-center gap-1.5 rounded-lg px-3.5 py-2 text-sm font-medium shadow-sm transition-all duration-150 disabled:cursor-not-allowed disabled:opacity-50";
+    "inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition-all duration-150 select-none whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-50";
+  const sizes: Record<string, string> = {
+    sm: "px-3 py-1.5 text-[13px]",
+    md: "px-4 py-2 text-[14px]",
+  };
   const variants: Record<string, string> = {
     primary:
-      "bg-brand-700 text-white hover:bg-brand-800 active:bg-brand-900 shadow-soft hover:shadow-md",
+      "bg-[#0071E3] text-white shadow-sm hover:bg-[#0077ED] active:bg-[#005BBF]",
     secondary:
-      "border border-ink-200 bg-white text-ink-700 hover:bg-ink-50 hover:border-ink-300",
+      "bg-[var(--bg-surface)] text-[var(--text-primary)] border border-[var(--separator)] hover:bg-[var(--bg-subtle)]",
     danger:
-      "bg-red-600 text-white hover:bg-red-700 active:bg-red-800 shadow-soft",
+      "bg-[#FF3B30] text-white shadow-sm hover:bg-[#FF453A] active:bg-[#D70015]",
     ghost:
-      "text-ink-600 hover:bg-ink-100 shadow-none",
+      "text-[var(--text-secondary)] hover:bg-[var(--bg-subtle)] hover:text-[var(--text-primary)]",
   };
   return (
     <button
       type={type}
       disabled={disabled}
       onClick={onClick}
-      className={`${base} ${variants[variant]} ${className}`}
+      className={`${base} ${sizes[size]} ${variants[variant]} ${className}`}
     >
       {children}
     </button>
@@ -85,8 +100,8 @@ export function Button({
 
 export function Loading({ label = "Loading..." }: { label?: string }) {
   return (
-    <div className="flex items-center justify-center gap-2.5 py-14 text-sm text-ink-500">
-      <span className="h-4 w-4 animate-spin rounded-full border-2 border-ink-200 border-t-brand-600" />
+    <div className="flex items-center justify-center gap-2.5 py-14 text-[14px] text-[var(--text-secondary)]">
+      <span className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--separator)] border-t-[#0071E3]" />
       {label}
     </div>
   );
@@ -100,15 +115,15 @@ export function EmptyState({
   icon?: React.ReactNode;
 }) {
   return (
-    <div className="flex flex-col items-center gap-3 px-6 py-16 text-center">
-      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-ink-100 text-ink-400">
+    <div className="flex flex-col items-center gap-3 px-6 py-16 text-center animate-fade-in">
+      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[var(--bg-subtle)] text-[var(--text-tertiary)] border border-[var(--separator-soft)]">
         {icon ?? (
           <svg
             viewBox="0 0 24 24"
             className="h-5 w-5"
             fill="none"
             stroke="currentColor"
-            strokeWidth={1.75}
+            strokeWidth={1.5}
             strokeLinecap="round"
             strokeLinejoin="round"
           >
@@ -117,7 +132,7 @@ export function EmptyState({
           </svg>
         )}
       </div>
-      <p className="text-sm text-ink-500">{message}</p>
+      <p className="text-[14px] text-[var(--text-secondary)]">{message}</p>
     </div>
   );
 }
@@ -130,13 +145,13 @@ export function ErrorState({
   onRetry?: () => void;
 }) {
   return (
-    <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+    <div className="rounded-xl border border-danger-500/20 bg-danger-50 p-4 text-[14px] text-danger-600 dark:bg-danger-500/10 dark:border-danger-500/30 dark:text-danger-500">
       <p className="font-semibold">Something went wrong</p>
-      <p className="mt-1 text-red-600/90">{message}</p>
+      <p className="mt-1 opacity-90">{message}</p>
       {onRetry ? (
         <button
           onClick={onRetry}
-          className="mt-3 rounded-md border border-red-300 bg-white px-3 py-1.5 text-xs font-medium text-red-700 transition-colors hover:bg-red-100"
+          className="mt-3 rounded-md border border-danger-500/30 bg-white px-3 py-1.5 text-[13px] font-medium text-danger-600 transition-colors hover:bg-danger-50 dark:bg-transparent dark:hover:bg-danger-500/10"
         >
           Retry
         </button>
@@ -158,18 +173,22 @@ export function Field({
 }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-ink-500">
+      <span className="mb-1.5 block text-[12px] font-medium text-[var(--text-secondary)] tracking-wide">
         {label}
-        {required ? <span className="text-red-500"> *</span> : null}
+        {required ? <span className="text-danger-500"> *</span> : null}
       </span>
       {children}
-      {hint ? <span className="mt-1 block text-xs text-ink-400">{hint}</span> : null}
+      {hint ? (
+        <span className="mt-1 block text-[12px] text-[var(--text-tertiary)]">
+          {hint}
+        </span>
+      ) : null}
     </label>
   );
 }
 
 const inputClass =
-  "w-full rounded-lg border border-ink-200 bg-white px-3 py-2 text-sm text-ink-900 placeholder:text-ink-400 transition-shadow outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 disabled:cursor-not-allowed disabled:bg-ink-50 disabled:text-ink-400";
+  "w-full rounded-lg border border-[var(--separator)] bg-[var(--bg-surface)] px-3 py-2 text-[14px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] transition-all outline-none focus:border-[#0071E3] focus:shadow-[0_0_0_3px_rgba(10,132,255,0.15)] disabled:cursor-not-allowed disabled:opacity-60";
 
 export function TextInput(
   props: React.InputHTMLAttributes<HTMLInputElement>

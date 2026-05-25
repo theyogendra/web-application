@@ -1,158 +1,74 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { motion } from "framer-motion";
+import {
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+  Legend,
+} from "recharts";
+import {
+  TrendingUp,
+  CircleDollarSign,
+  ReceiptText,
+  Clock,
+  AlertTriangle,
+  Download,
+  FileSpreadsheet,
+} from "lucide-react";
 import { apiGet, downloadFile } from "@/lib/api";
 import { formatCurrency, titleCase } from "@/lib/format";
-import {
-  Button,
-  Card,
-  EmptyState,
-  ErrorState,
-  Loading,
-  PageHeader,
-} from "@/components/ui";
+import { Button, Card, EmptyState, ErrorState, Loading, PageHeader } from "@/components/ui";
+import StatCard from "@/components/StatCard";
 
-function KpiCard({
-  label,
-  value,
-  accent,
-}: {
-  label: string;
-  value: string;
-  accent?: boolean;
-}) {
-  return (
-    <div
-      className={`rounded-lg border p-4 ${
-        accent
-          ? "border-blue-200 bg-blue-50"
-          : "border-gray-200 bg-white"
-      }`}
-    >
-      <div className="text-xs uppercase tracking-wide text-gray-500">
-        {label}
-      </div>
-      <div
-        className={`mt-1 text-xl font-semibold ${
-          accent ? "text-accent" : "text-gray-900"
-        }`}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
+const STATUS_COLORS: Record<string, string> = {
+  draft: "#86868B",
+  sent: "#0A84FF",
+  partially_paid: "#FF9500",
+  paid: "#34C759",
+  cancelled: "#3A3A3C",
+  overdue: "#FF3B30",
+  accepted: "#34C759",
+  rejected: "#FF3B30",
+  converted: "#AF52DE",
+};
 
-function Section({
-  title,
-  children,
-  exportType,
-  onExportError,
-}: {
-  title: string;
-  children: React.ReactNode;
-  exportType?: string;
-  onExportError: (msg: string) => void;
-}) {
-  const [busy, setBusy] = useState<string | null>(null);
+const METHOD_COLORS: Record<string, string> = {
+  cash: "#34C759",
+  bank_transfer: "#0A84FF",
+  card: "#AF52DE",
+  upi: "#FF9500",
+  cheque: "#5AC8FA",
+  online: "#FF2D55",
+};
 
-  async function doExport(format: "csv" | "pdf") {
-    if (!exportType) return;
-    setBusy(format);
-    try {
-      await downloadFile(
-        `/reports/export?type=${exportType}&format=${format}`,
-        `${exportType}.${format}`
-      );
-    } catch (err: any) {
-      onExportError(err?.message || "Export failed.");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  return (
-    <Card className="p-5">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-semibold text-gray-900">{title}</h2>
-        {exportType ? (
-          <div className="flex gap-2">
-            <Button
-              variant="secondary"
-              onClick={() => doExport("csv")}
-              disabled={busy !== null}
-            >
-              {busy === "csv" ? "..." : "Export CSV"}
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={() => doExport("pdf")}
-              disabled={busy !== null}
-            >
-              {busy === "pdf" ? "..." : "Export PDF"}
-            </Button>
-          </div>
-        ) : null}
-      </div>
-      {children}
-    </Card>
-  );
-}
-
-function SimpleTable({
-  headers,
-  rows,
-  empty,
-}: {
-  headers: string[];
-  rows: React.ReactNode[][];
-  empty: string;
-}) {
-  if (rows.length === 0) {
-    return <EmptyState message={empty} />;
-  }
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500">
-            {headers.map((h, i) => (
-              <th
-                key={i}
-                className={`py-2 px-2 ${i > 0 ? "text-right" : ""}`}
-              >
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((cells, ri) => (
-            <tr key={ri} className="border-b border-gray-100">
-              {cells.map((c, ci) => (
-                <td
-                  key={ci}
-                  className={`py-2 px-2 ${
-                    ci > 0
-                      ? "text-right text-gray-700"
-                      : "text-gray-900"
-                  }`}
-                >
-                  {c}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
+function tooltipStyle(): React.CSSProperties {
+  return {
+    background: "var(--bg-elevated)",
+    border: "1px solid var(--separator)",
+    borderRadius: 10,
+    fontSize: 12,
+    padding: "8px 10px",
+    boxShadow: "0 8px 24px -4px rgba(15,23,42,0.12)",
+    color: "var(--text-primary)",
+  };
 }
 
 export default function ReportsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState<string | null>(null);
 
   const [summary, setSummary] = useState<any>(null);
   const [revenue, setRevenue] = useState<any>(null);
@@ -173,21 +89,15 @@ export default function ReportsPage() {
         apiGet("/reports/customers"),
         apiGet("/reports/tax"),
       ]);
-
       const get = (i: number) =>
         results[i].status === "fulfilled"
           ? (results[i] as PromiseFulfilledResult<any>).value
           : null;
-
-      // If everything failed, treat as a hard error (backend unreachable).
       const allFailed = results.every((r) => r.status === "rejected");
       if (allFailed) {
         const first = results[0] as PromiseRejectedResult;
-        throw new Error(
-          first.reason?.message || "Failed to load reports."
-        );
+        throw new Error(first.reason?.message || "Failed to load reports.");
       }
-
       setSummary(get(0)?.data || null);
       setRevenue(get(1)?.data || null);
       setInvoices(get(2)?.data || null);
@@ -202,9 +112,38 @@ export default function ReportsPage() {
     }
   }
 
-  useEffect(() => {
-    load();
-  }, []);
+  useEffect(() => { load(); }, []);
+
+  // Build a 12-point trend for each KPI sparkline. Falls back to the monthly
+  // revenue series for the headline cards; secondary cards get a flat trace.
+  const revTrend = useMemo(() => {
+    const m = revenue?.monthly || [];
+    if (m.length === 0) return [0, 0];
+    return m.map((p: any) => Number(p.revenue) || 0);
+  }, [revenue]);
+
+  // Derive a delta % from the last two revenue months (or NaN if not enough data).
+  const revDelta = useMemo(() => {
+    const series = revTrend;
+    if (!Array.isArray(series) || series.length < 2) return NaN;
+    const last = series[series.length - 1];
+    const prev = series[series.length - 2];
+    if (!isFinite(prev) || prev === 0) return NaN;
+    return ((last - prev) / Math.abs(prev)) * 100;
+  }, [revTrend]);
+
+  async function doExport(type: string, format: "csv" | "pdf") {
+    const key = `${type}-${format}`;
+    setExporting(key);
+    setExportError(null);
+    try {
+      await downloadFile(`/reports/export?type=${type}&format=${format}`, `${type}.${format}`);
+    } catch (err: any) {
+      setExportError(err?.message || "Export failed.");
+    } finally {
+      setExporting(null);
+    }
+  }
 
   if (loading) {
     return (
@@ -214,7 +153,6 @@ export default function ReportsPage() {
       </div>
     );
   }
-
   if (error) {
     return (
       <div>
@@ -226,199 +164,450 @@ export default function ReportsPage() {
 
   const counts = summary?.invoice_counts || {};
 
+  const statusData = (invoices?.by_status || []).map((s: any) => ({
+    name: titleCase(s.status),
+    value: Number(s.amount) || 0,
+    count: Number(s.count) || 0,
+    color: STATUS_COLORS[s.status] || "#86868B",
+  }));
+
+  const monthlyData = (revenue?.monthly || []).map((m: any) => ({
+    month: m.month,
+    revenue: Number(m.revenue) || 0,
+  }));
+
+  const methodData = (paymentsRep?.by_method || []).map((m: any) => ({
+    name: titleCase(m.method).replace(/_/g, " "),
+    amount: Number(m.amount) || 0,
+    count: Number(m.count) || 0,
+    color: METHOD_COLORS[m.method] || "#86868B",
+  }));
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-7">
       <PageHeader
         title="Reports"
         description="Revenue, invoices, payments and tax analytics."
+        actions={
+          <Button
+            variant="secondary"
+            onClick={() => doExport("summary", "pdf")}
+            disabled={!!exporting}
+          >
+            <Download size={14} />
+            {exporting === "summary-pdf" ? "Exporting..." : "Export summary"}
+          </Button>
+        }
       />
 
-      {exportError ? (
-        <ErrorState message={exportError} />
-      ) : null}
+      {exportError ? <ErrorState message={exportError} /> : null}
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        <KpiCard
+      {/* Hero KPI strip */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard
           label="Total Revenue"
           value={formatCurrency(summary?.total_revenue)}
-          accent
+          delta={revDelta}
+          deltaSuffix="vs last month"
+          trend={revTrend}
+          accent="blue"
+          icon={<TrendingUp size={18} />}
         />
-        <KpiCard
+        <StatCard
           label="Outstanding"
           value={formatCurrency(summary?.total_outstanding)}
+          invertDelta
+          deltaSuffix="open balance"
+          accent="amber"
+          icon={<CircleDollarSign size={18} />}
         />
-        <KpiCard
+        <StatCard
           label="Paid Invoices"
           value={String(counts.paid ?? 0)}
+          deltaSuffix="settled"
+          accent="green"
+          icon={<ReceiptText size={18} />}
         />
-        <KpiCard
-          label="Pending"
-          value={String(counts.pending ?? counts.sent ?? 0)}
-        />
-        <KpiCard
+        <StatCard
           label="Overdue"
           value={String(counts.overdue ?? 0)}
-        />
-        <KpiCard
-          label="Partial Payments"
-          value={String(counts.partially_paid ?? 0)}
-        />
-        <KpiCard
-          label="Total Tax"
-          value={formatCurrency(summary?.total_tax)}
-        />
-        <KpiCard
-          label="Total Invoiced"
-          value={formatCurrency(summary?.total_invoiced)}
+          invertDelta
+          deltaSuffix="needs attention"
+          accent="red"
+          icon={<AlertTriangle size={18} />}
         />
       </div>
 
-      <Section
-        title="Monthly Revenue"
-        exportType="revenue"
-        onExportError={setExportError}
-      >
-        <SimpleTable
-          headers={["Month", "Revenue"]}
-          rows={(revenue?.monthly || []).map((m: any) => [
-            m.month,
-            formatCurrency(m.revenue),
-          ])}
-          empty="No revenue data available."
-        />
-        {revenue?.total_revenue != null ? (
-          <div className="mt-3 text-right text-sm font-semibold text-gray-900">
-            Total: {formatCurrency(revenue.total_revenue)}
-          </div>
-        ) : null}
-      </Section>
-
-      <Section
-        title="Invoices by Status"
-        exportType="invoices"
-        onExportError={setExportError}
-      >
-        <SimpleTable
-          headers={["Status", "Count", "Amount"]}
-          rows={(invoices?.by_status || []).map((s: any) => [
-            titleCase(s.status),
-            String(s.count ?? 0),
-            formatCurrency(s.amount),
-          ])}
-          empty="No invoice status data available."
-        />
-      </Section>
-
-      <Section
-        title="Invoice Aging"
-        exportType="aging"
-        onExportError={setExportError}
-      >
-        <SimpleTable
-          headers={["Bucket", "Count", "Amount"]}
-          rows={(invoices?.aging || []).map((a: any) => [
-            a.bucket,
-            String(a.count ?? 0),
-            formatCurrency(a.amount),
-          ])}
-          empty="No aging data available."
-        />
-      </Section>
-
-      <Section
-        title="Payment Method Summary"
-        exportType="payments"
-        onExportError={setExportError}
-      >
-        <SimpleTable
-          headers={["Method", "Count", "Amount"]}
-          rows={(paymentsRep?.by_method || []).map((m: any) => [
-            titleCase(m.method),
-            String(m.count ?? 0),
-            formatCurrency(m.amount),
-          ])}
-          empty="No payment method data available."
-        />
-        {paymentsRep?.total != null ? (
-          <div className="mt-3 text-right text-sm font-semibold text-gray-900">
-            Total: {formatCurrency(paymentsRep.total)}
-          </div>
-        ) : null}
-      </Section>
-
-      <Section
-        title="Customer-wise Revenue"
-        exportType="customers"
-        onExportError={setExportError}
-      >
-        <SimpleTable
-          headers={["Customer", "Invoices", "Invoiced", "Paid", "Balance"]}
-          rows={customers.map((c: any) => [
-            c.customer,
-            String(c.invoice_count ?? 0),
-            formatCurrency(c.invoiced),
-            formatCurrency(c.paid),
-            formatCurrency(c.balance),
-          ])}
-          empty="No customer data available."
-        />
-      </Section>
-
-      <Section
-        title="Tax Summary"
-        exportType="tax"
-        onExportError={setExportError}
-      >
-        <SimpleTable
-          headers={["Month", "Subtotal", "Discount", "Tax", "Total"]}
-          rows={(tax?.by_month || []).map((m: any) => [
-            m.month,
-            formatCurrency(m.subtotal),
-            formatCurrency(m.discount),
-            formatCurrency(m.tax),
-            formatCurrency(m.total),
-          ])}
-          empty="No tax data available."
-        />
-        {tax ? (
-          <div className="mt-3 grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
-            <div className="rounded bg-gray-50 p-2">
-              <div className="text-xs text-gray-500">Subtotal</div>
-              <div className="font-semibold text-gray-900">
-                {formatCurrency(tax.total_subtotal)}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        {/* Revenue trend */}
+        <motion.div
+          className="lg:col-span-2"
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.05 }}
+        >
+          <Card className="p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
+                  Revenue trend
+                </h2>
+                <p className="mt-0.5 text-[12.5px] text-[var(--text-tertiary)]">
+                  Monthly cash collected
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button variant="ghost" size="sm" onClick={() => doExport("revenue", "csv")}>
+                  <FileSpreadsheet size={13} />
+                  CSV
+                </Button>
               </div>
             </div>
-            <div className="rounded bg-gray-50 p-2">
-              <div className="text-xs text-gray-500">Discount</div>
-              <div className="font-semibold text-gray-900">
-                {formatCurrency(tax.total_discount)}
+            {monthlyData.length === 0 ? (
+              <EmptyState message="No revenue data yet." />
+            ) : (
+              <div className="h-[260px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={monthlyData} margin={{ top: 5, right: 8, bottom: 0, left: 0 }}>
+                    <defs>
+                      <linearGradient id="revenueArea" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#0A84FF" stopOpacity={0.32} />
+                        <stop offset="100%" stopColor="#0A84FF" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke="var(--separator-soft)" vertical={false} />
+                    <XAxis
+                      dataKey="month"
+                      tick={{ fill: "var(--text-tertiary)", fontSize: 11 }}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      tick={{ fill: "var(--text-tertiary)", fontSize: 11 }}
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(v) => "₹" + (v >= 1000 ? (v / 1000).toFixed(0) + "k" : v)}
+                      width={48}
+                    />
+                    <Tooltip
+                      contentStyle={tooltipStyle()}
+                      formatter={(v: any) => formatCurrency(v)}
+                      labelStyle={{ color: "var(--text-secondary)", fontSize: 11 }}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="revenue"
+                      stroke="#0A84FF"
+                      strokeWidth={2}
+                      fill="url(#revenueArea)"
+                      animationDuration={700}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
               </div>
-            </div>
-            <div className="rounded bg-gray-50 p-2">
-              <div className="text-xs text-gray-500">Tax</div>
-              <div className="font-semibold text-gray-900">
-                {formatCurrency(tax.total_tax)}
-              </div>
-            </div>
-            <div className="rounded bg-gray-50 p-2">
-              <div className="text-xs text-gray-500">Total</div>
-              <div className="font-semibold text-gray-900">
-                {formatCurrency(tax.total_amount)}
-              </div>
-            </div>
-          </div>
-        ) : null}
-      </Section>
+            )}
+          </Card>
+        </motion.div>
 
-      <Section
-        title="Summary Export"
-        exportType="summary"
-        onExportError={setExportError}
-      >
-        <p className="text-sm text-gray-500">
-          Download the overall summary report as CSV or PDF.
-        </p>
-      </Section>
+        {/* Invoice status donut */}
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.10 }}
+        >
+          <Card className="p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
+                  Invoices by status
+                </h2>
+                <p className="mt-0.5 text-[12.5px] text-[var(--text-tertiary)]">
+                  Distribution of total invoiced
+                </p>
+              </div>
+            </div>
+            {statusData.length === 0 ? (
+              <EmptyState message="No invoice data yet." />
+            ) : (
+              <div className="h-[260px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={statusData}
+                      dataKey="value"
+                      nameKey="name"
+                      innerRadius={56}
+                      outerRadius={86}
+                      paddingAngle={2}
+                      stroke="var(--bg-surface)"
+                      strokeWidth={3}
+                      animationDuration={700}
+                    >
+                      {statusData.map((entry: any, idx: number) => (
+                        <Cell key={idx} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip
+                      contentStyle={tooltipStyle()}
+                      formatter={(v: any) => formatCurrency(v)}
+                    />
+                    <Legend
+                      verticalAlign="bottom"
+                      iconType="circle"
+                      iconSize={8}
+                      wrapperStyle={{ fontSize: 11.5, color: "var(--text-secondary)" }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </Card>
+        </motion.div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        {/* Payment methods */}
+        <motion.div
+          className="lg:col-span-2"
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.15 }}
+        >
+          <Card className="p-5">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
+                  Payment methods
+                </h2>
+                <p className="mt-0.5 text-[12.5px] text-[var(--text-tertiary)]">
+                  Total collected by channel
+                </p>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => doExport("payments", "csv")}>
+                <FileSpreadsheet size={13} />
+                CSV
+              </Button>
+            </div>
+            {methodData.length === 0 ? (
+              <EmptyState message="No payment data yet." />
+            ) : (
+              <div className="h-[260px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={methodData} margin={{ top: 10, right: 8, bottom: 0, left: 0 }}>
+                    <CartesianGrid stroke="var(--separator-soft)" vertical={false} />
+                    <XAxis
+                      dataKey="name"
+                      tick={{ fill: "var(--text-tertiary)", fontSize: 11 }}
+                      axisLine={false}
+                      tickLine={false}
+                    />
+                    <YAxis
+                      tick={{ fill: "var(--text-tertiary)", fontSize: 11 }}
+                      axisLine={false}
+                      tickLine={false}
+                      tickFormatter={(v) => "₹" + (v >= 1000 ? (v / 1000).toFixed(0) + "k" : v)}
+                      width={48}
+                    />
+                    <Tooltip
+                      contentStyle={tooltipStyle()}
+                      formatter={(v: any) => formatCurrency(v)}
+                    />
+                    <Bar dataKey="amount" radius={[6, 6, 0, 0]} animationDuration={700}>
+                      {methodData.map((entry: any, idx: number) => (
+                        <Cell key={idx} fill={entry.color} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </Card>
+        </motion.div>
+
+        {/* Aging snapshot */}
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.20 }}
+        >
+          <Card className="p-5">
+            <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
+              Invoice aging
+            </h2>
+            <p className="mt-0.5 text-[12.5px] text-[var(--text-tertiary)]">
+              Outstanding by overdue bucket
+            </p>
+            <div className="mt-4 space-y-2.5">
+              {(invoices?.aging || []).map((row: any) => {
+                const total = (invoices?.aging || []).reduce(
+                  (s: number, r: any) => s + (Number(r.amount) || 0),
+                  0
+                );
+                const pct = total > 0 ? ((Number(row.amount) || 0) / total) * 100 : 0;
+                const tone =
+                  row.bucket === "90+" ? "bg-[#FF3B30]"
+                  : row.bucket === "61-90" ? "bg-[#FF9500]"
+                  : row.bucket === "31-60" ? "bg-[#FF9F0A]"
+                  : row.bucket === "1-30" ? "bg-[#FFCC00]"
+                  : "bg-[#34C759]";
+                return (
+                  <div key={row.bucket}>
+                    <div className="flex items-center justify-between text-[12.5px]">
+                      <span className="text-[var(--text-secondary)]">{row.bucket}</span>
+                      <span className="financial font-medium text-[var(--text-primary)]">
+                        {formatCurrency(row.amount)}
+                      </span>
+                    </div>
+                    <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[var(--bg-subtle)]">
+                      <motion.div
+                        className={`h-full ${tone}`}
+                        initial={{ width: 0 }}
+                        animate={{ width: `${pct}%` }}
+                        transition={{ duration: 0.6, ease: "easeOut" }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+              {(!invoices?.aging || invoices.aging.length === 0) && (
+                <EmptyState message="No aging data yet." />
+              )}
+            </div>
+          </Card>
+        </motion.div>
+      </div>
+
+      {/* Top customers + Tax summary */}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.25 }}
+        >
+          <Card className="p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
+                  Top customers
+                </h2>
+                <p className="mt-0.5 text-[12.5px] text-[var(--text-tertiary)]">
+                  By total paid
+                </p>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => doExport("customers", "csv")}>
+                <FileSpreadsheet size={13} />
+                CSV
+              </Button>
+            </div>
+            {customers.length === 0 ? (
+              <EmptyState message="No customer data yet." />
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-[13px]">
+                  <thead>
+                    <tr className="border-b border-[var(--separator-soft)] text-[11px] uppercase tracking-wide text-[var(--text-tertiary)]">
+                      <th className="py-2 text-left font-medium">Customer</th>
+                      <th className="py-2 text-right font-medium">Invoices</th>
+                      <th className="py-2 text-right font-medium">Paid</th>
+                      <th className="py-2 text-right font-medium">Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {customers.slice(0, 8).map((c: any) => (
+                      <tr
+                        key={c.customer}
+                        className="border-b border-[var(--separator-soft)] last:border-0 transition-colors hover:bg-[var(--bg-subtle)]"
+                      >
+                        <td className="py-2.5 font-medium text-[var(--text-primary)]">
+                          {c.customer}
+                        </td>
+                        <td className="py-2.5 text-right text-[var(--text-secondary)]">
+                          {c.invoice_count ?? 0}
+                        </td>
+                        <td className="financial py-2.5 text-right text-[var(--text-primary)]">
+                          {formatCurrency(c.paid)}
+                        </td>
+                        <td className="financial py-2.5 text-right text-[var(--text-secondary)]">
+                          {formatCurrency(c.balance)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3, delay: 0.30 }}
+        >
+          <Card className="p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
+                  Tax summary
+                </h2>
+                <p className="mt-0.5 text-[12.5px] text-[var(--text-tertiary)]">
+                  GST collected to date
+                </p>
+              </div>
+              <Button variant="ghost" size="sm" onClick={() => doExport("tax", "csv")}>
+                <FileSpreadsheet size={13} />
+                CSV
+              </Button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                ["Subtotal", tax?.total_subtotal],
+                ["Discount", tax?.total_discount],
+                ["Tax", tax?.total_tax],
+                ["Total", tax?.total_amount],
+              ].map(([label, val]) => (
+                <div
+                  key={label as string}
+                  className="rounded-xl border border-[var(--separator-soft)] bg-[var(--bg-subtle)] p-3"
+                >
+                  <p className="text-[11.5px] font-medium uppercase tracking-wide text-[var(--text-tertiary)]">
+                    {label}
+                  </p>
+                  <p className="financial mt-1 text-[18px] font-semibold text-[var(--text-primary)]">
+                    {formatCurrency(val)}
+                  </p>
+                </div>
+              ))}
+            </div>
+            {tax?.by_month && tax.by_month.length > 0 && (
+              <div className="mt-4 max-h-[140px] overflow-y-auto rounded-lg border border-[var(--separator-soft)]">
+                <table className="w-full text-[12.5px]">
+                  <thead className="sticky top-0 bg-[var(--bg-subtle)]">
+                    <tr className="text-[11px] uppercase tracking-wide text-[var(--text-tertiary)]">
+                      <th className="px-3 py-1.5 text-left font-medium">Month</th>
+                      <th className="px-3 py-1.5 text-right font-medium">Tax</th>
+                      <th className="px-3 py-1.5 text-right font-medium">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tax.by_month.map((m: any) => (
+                      <tr key={m.month} className="border-t border-[var(--separator-soft)]">
+                        <td className="px-3 py-1.5 text-[var(--text-secondary)]">{m.month}</td>
+                        <td className="financial px-3 py-1.5 text-right text-[var(--text-primary)]">
+                          {formatCurrency(m.tax)}
+                        </td>
+                        <td className="financial px-3 py-1.5 text-right text-[var(--text-secondary)]">
+                          {formatCurrency(m.total)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        </motion.div>
+      </div>
     </div>
   );
 }

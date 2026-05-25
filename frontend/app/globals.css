@@ -2,40 +2,118 @@
 @tailwind components;
 @tailwind utilities;
 
-html,
-body {
+/* Apple-inspired palette — pure, neutral, with system blue accent. */
+:root {
+  --bg-page:        #F5F5F7;
+  --bg-surface:     #FFFFFF;
+  --bg-elevated:    #FFFFFF;
+  --bg-subtle:      #FBFBFD;
+  --text-primary:   #1D1D1F;
+  --text-secondary: #6E6E73;
+  --text-tertiary:  #86868B;
+  --separator:      rgba(60, 60, 67, 0.12);
+  --separator-soft: rgba(60, 60, 67, 0.06);
+}
+
+.dark {
+  --bg-page:        #000000;
+  --bg-surface:     #1C1C1E;
+  --bg-elevated:    #2C2C2E;
+  --bg-subtle:      #0B0B0F;
+  --text-primary:   #F5F5F7;
+  --text-secondary: #AEAEB2;
+  --text-tertiary:  #8E8E93;
+  --separator:      rgba(84, 84, 88, 0.40);
+  --separator-soft: rgba(84, 84, 88, 0.20);
+}
+
+html, body {
   height: 100%;
 }
 
 body {
-  background-color: #f8fafc;
-  color: #0f172a;
+  background-color: var(--bg-page);
+  color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  font-feature-settings: "rlig" 1, "calt" 1;
+  font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1, "cv11" 1;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.011em;          /* Apple-style tight tracking */
 }
 
-*:focus {
-  outline: none;
+/* Apple-style display tracking: tighter for larger sizes */
+h1 { letter-spacing: -0.022em; font-weight: 600; }
+h2 { letter-spacing: -0.022em; font-weight: 600; }
+h3, h4 { letter-spacing: -0.016em; font-weight: 600; }
+
+/* Tabular figures for amounts / counts */
+.financial {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1, "ss01" 1;
+  letter-spacing: -0.018em;
 }
+
+*:focus { outline: none; }
 *:focus-visible {
-  outline: 2px solid #2563eb;
+  outline: 2px solid #0071E3;
   outline-offset: 2px;
-  border-radius: 4px;
+  border-radius: 8px;
 }
 
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+::selection {
+  background-color: rgba(10, 132, 255, 0.18);
+  color: inherit;
 }
-::-webkit-scrollbar-track {
-  background: transparent;
-}
+
+/* Slim, near-invisible scrollbars (macOS-like) */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: rgba(60, 60, 67, 0.20);
   border-radius: 8px;
-  border: 2px solid #f8fafc;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: rgba(60, 60, 67, 0.36);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(235, 235, 245, 0.18);
+  background-clip: padding-box;
+}
+
+/* Frosted glass — used in navbar / sidebar / overlays */
+.glass {
+  background-color: rgba(255, 255, 255, 0.72);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+}
+.dark .glass {
+  background-color: rgba(28, 28, 30, 0.68);
+}
+
+/* Subtle separator helper — match macOS Big Sur lists */
+.hairline {
+  border-color: var(--separator-soft);
+}
+
+/* Surface utility — replaces `bg-white` semantics so dark mode swaps cleanly */
+.surface {
+  background-color: var(--bg-surface);
+  color: var(--text-primary);
+}
+.surface-elevated {
+  background-color: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+/* Hover lift — Stripe/Linear-style */
+.lift {
+  transition: transform 200ms cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.lift:hover {
+  transform: translateY(-1px);
 }
