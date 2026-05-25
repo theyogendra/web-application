@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/api";
 import { formatCurrency, formatDateTime } from "@/lib/format";
+import { canEdit as canEditModule } from "@/lib/auth";
 import {
   Button,
   Card,
@@ -31,6 +32,11 @@ export default function ProductDetailPage() {
   const [busy, setBusy] = useState<string | null>(null);
 
   const [showAdjust, setShowAdjust] = useState(false);
+
+  const [mayEdit, setMayEdit] = useState(false);
+  useEffect(() => {
+    setMayEdit(canEditModule("inventory"));
+  }, []);
 
   async function load() {
     setLoading(true);
@@ -138,29 +144,31 @@ export default function ProductDetailPage() {
           product.sku ? `SKU: ${product.sku}` : "Product details and stock."
         }
         actions={
-          <>
-            <Link href={`/inventory/${id}/edit`}>
-              <Button variant="secondary">Edit</Button>
-            </Link>
-            <Button
-              variant="secondary"
-              onClick={handleToggleActive}
-              disabled={busy !== null}
-            >
-              {busy === "toggle"
-                ? "Saving..."
-                : product.is_active
-                ? "Deactivate"
-                : "Activate"}
-            </Button>
-            <Button
-              variant="danger"
-              onClick={handleDelete}
-              disabled={busy !== null}
-            >
-              {busy === "delete" ? "Deleting..." : "Delete"}
-            </Button>
-          </>
+          mayEdit ? (
+            <>
+              <Link href={`/inventory/${id}/edit`}>
+                <Button variant="secondary">Edit</Button>
+              </Link>
+              <Button
+                variant="secondary"
+                onClick={handleToggleActive}
+                disabled={busy !== null}
+              >
+                {busy === "toggle"
+                  ? "Saving..."
+                  : product.is_active
+                  ? "Deactivate"
+                  : "Activate"}
+              </Button>
+              <Button
+                variant="danger"
+                onClick={handleDelete}
+                disabled={busy !== null}
+              >
+                {busy === "delete" ? "Deleting..." : "Delete"}
+              </Button>
+            </>
+          ) : null
         }
       />
 
@@ -251,7 +259,9 @@ export default function ProductDetailPage() {
       <Card className="mb-5 p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-base font-semibold text-gray-900">Stock</h2>
-          <Button onClick={() => setShowAdjust(true)}>Adjust Stock</Button>
+          {mayEdit ? (
+            <Button onClick={() => setShowAdjust(true)}>Adjust Stock</Button>
+          ) : null}
         </div>
 
         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">

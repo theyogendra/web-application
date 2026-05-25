@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { apiGet } from "@/lib/api";
 import { formatCurrency } from "@/lib/format";
+import { canEdit as canEditModule } from "@/lib/auth";
 import {
   Button,
   Card,
@@ -28,6 +29,11 @@ export default function InventoryPage() {
   const [category, setCategory] = useState("");
   const [isActive, setIsActive] = useState("");
   const [lowStock, setLowStock] = useState(false);
+
+  const [mayEdit, setMayEdit] = useState(false);
+  useEffect(() => {
+    setMayEdit(canEditModule("inventory"));
+  }, []);
 
   async function loadCategories() {
     try {
@@ -85,9 +91,11 @@ export default function InventoryPage() {
         title="Inventory"
         description="Manage your products, stock levels and pricing."
         actions={
-          <Link href="/inventory/create">
-            <Button>+ New Product</Button>
-          </Link>
+          mayEdit ? (
+            <Link href="/inventory/create">
+              <Button>+ New Product</Button>
+            </Link>
+          ) : null
         }
       />
 

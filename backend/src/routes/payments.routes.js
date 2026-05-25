@@ -109,13 +109,14 @@ router.get('/:id', async (req, res, next) => {
   }
 });
 
-// POST /payments  -- record a payment against an invoice
+// POST /payments  -- record a payment, in pending-approval state.
+// The invoice is NOT credited until an accountant approves via /approve.
 router.post('/', requirePermission('payments.create'), async (req, res, next) => {
   try {
     const userId = req.user ? req.user.id : null;
     const {
       invoice_id, amount, payment_method, payment_date,
-      reference_number, notes, send_receipt
+      reference_number, notes
     } = req.body;
 
     if (!invoice_id) {
@@ -134,7 +135,7 @@ router.post('/', requirePermission('payments.create'), async (req, res, next) =>
       });
     }
 
-    // Atomic insert + overpayment guard + invoice status update.
+    // RPC inserts in approval_status='pending'; invoice unchanged until approval.
     const { data: result, error: rpcError } = await supabase.rpc('record_invoice_payment', {
       invoice_id_input: invoice_id,
       amount_input: amt,
@@ -144,7 +145,6 @@ router.post('/', requirePermission('payments.create'), async (req, res, next) =>
       notes_input: notes || null,
       user_id_input: userId
     });
-
     if (rpcError) throw rpcError;
     if (!result || !result.success) {
       return res.status(400).json(result || { success: false, message: 'Payment failed' });
@@ -159,43 +159,117 @@ router.post('/', requirePermission('payments.create'), async (req, res, next) =>
       entityType: 'payment',
       entityId: payment.id,
       newData: payment,
-      details: {
-        invoice_id,
-        amount: amt,
-        method,
-        invoice_status: result.invoice_status,
-        balance_due: result.balance_due
-      }
+      details: { invoice_id, amount: amt, method, approval_status: 'pending' }
     });
-
-    // Best-effort receipt email (never blocks the payment response).
-    let email = { skipped: true };
-    if (send_receipt !== false) {
-      try {
-        const { data: invoice } = await supabase.from('invoices').select('*').eq('id', invoice_id).single();
-        if (invoice) {
-          email = await sendPaymentReceiptEmail(invoice, payment);
-          if (result.invoice_status === 'paid') {
-            await sendInvoicePaidEmail(invoice);
-          }
-        }
-      } catch (mailErr) {
-        console.error('Receipt email failed:', mailErr.message);
-        email = { success: false, message: mailErr.message };
-      }
-    }
 
     res.status(201).json({
       success: true,
-      message: 'Payment recorded successfully',
+      message: 'Payment recorded; awaiting approval',
       data: payment,
       invoice: {
         status: result.invoice_status,
         paid_amount: result.paid_amount,
         balance_due: result.balance_due
+      }
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /payments/:id/approve  -- Accountant approves. RPC flips status,
+// recalculates invoice totals, and (when this brings the invoice to fully
+// paid) deducts inventory stock + logs stock_movements.
+router.post('/:id/approve', requirePermission('payments.approve'), async (req, res, next) => {
+  try {
+    const userId = req.user ? req.user.id : null;
+    const { data: existing } = await supabase.from('payments').select('*').eq('id', req.params.id).maybeSingle();
+    if (!existing) return res.status(404).json({ success: false, message: 'Payment not found' });
+
+    const { data: result, error: rpcError } = await supabase.rpc('approve_invoice_payment', {
+      payment_id_input: req.params.id,
+      user_id_input: userId
+    });
+    if (rpcError) throw rpcError;
+    if (!result || !result.success) {
+      return res.status(400).json(result || { success: false, message: 'Approval failed' });
+    }
+
+    const { data: updated } = await supabase.from('payments').select('*').eq('id', req.params.id).maybeSingle();
+
+    await createAuditLog({
+      req, action: 'payment_approved', module: 'Payments',
+      entityType: 'payment', entityId: req.params.id,
+      oldData: existing, newData: updated,
+      details: {
+        invoice_status: result.invoice_status,
+        paid_amount: result.paid_amount,
+        balance_due: result.balance_due,
+        inventory_deducted: !!result.inventory_deducted
+      }
+    });
+
+    // Receipt email is best-effort, fires on approval (the moment the
+    // customer's payment is actually credited).
+    let email = { skipped: true };
+    try {
+      const { data: invoice } = await supabase.from('invoices').select('*').eq('id', existing.invoice_id).maybeSingle();
+      if (invoice && invoice.customer_email) {
+        email = await sendPaymentReceiptEmail(invoice, updated);
+        if (result.invoice_status === 'paid') {
+          await sendInvoicePaidEmail(invoice);
+        }
+      }
+    } catch (mailErr) {
+      console.error('Receipt email failed:', mailErr.message);
+      email = { success: false, message: mailErr.message };
+    }
+
+    res.json({
+      success: true,
+      message: 'Payment approved',
+      data: updated,
+      invoice: {
+        status: result.invoice_status,
+        paid_amount: result.paid_amount,
+        balance_due: result.balance_due,
+        inventory_deducted: !!result.inventory_deducted
       },
       email
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /payments/:id/reject  -- Accountant rejects a pending payment.
+router.post('/:id/reject', requirePermission('payments.approve'), async (req, res, next) => {
+  try {
+    const userId = req.user ? req.user.id : null;
+    const reason = req.body && req.body.reason ? String(req.body.reason) : 'Rejected';
+
+    const { data: existing } = await supabase.from('payments').select('*').eq('id', req.params.id).maybeSingle();
+    if (!existing) return res.status(404).json({ success: false, message: 'Payment not found' });
+
+    const { data: result, error: rpcError } = await supabase.rpc('reject_invoice_payment', {
+      payment_id_input: req.params.id,
+      user_id_input: userId,
+      reason_input: reason
+    });
+    if (rpcError) throw rpcError;
+    if (!result || !result.success) {
+      return res.status(400).json(result || { success: false, message: 'Rejection failed' });
+    }
+
+    const { data: updated } = await supabase.from('payments').select('*').eq('id', req.params.id).maybeSingle();
+
+    await createAuditLog({
+      req, action: 'payment_rejected', module: 'Payments',
+      entityType: 'payment', entityId: req.params.id,
+      oldData: existing, newData: updated, details: { reason }
+    });
+
+    res.json({ success: true, message: 'Payment rejected', data: updated });
   } catch (err) {
     next(err);
   }

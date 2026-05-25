@@ -14,6 +14,7 @@ import {
   formatDate,
 } from "@/lib/format";
 import { computeLineTotal } from "@/lib/totals";
+import { canEdit as canEditModule } from "@/lib/auth";
 import StatusBadge from "@/components/StatusBadge";
 import {
   Button,
@@ -40,6 +41,12 @@ export default function QuotationDetailPage() {
   const [busy, setBusy] = useState<string | null>(null);
 
   const [showConvert, setShowConvert] = useState(false);
+  const [createdInvoice, setCreatedInvoice] = useState<{ id: string; invoice_number: string } | null>(null);
+
+  const [mayEdit, setMayEdit] = useState(false);
+  useEffect(() => {
+    setMayEdit(canEditModule("quotations"));
+  }, []);
 
   async function load() {
     setLoading(true);
@@ -121,7 +128,21 @@ export default function QuotationDetailPage() {
       if (res && res.success === false) {
         throw new Error(res.message || `Failed to mark ${action}.`);
       }
-      flash(`Marked ${action}.`);
+      // When accepting, the backend now auto-creates a draft invoice and
+      // returns it alongside the updated quotation.
+      const inv = res?.data?.invoice || res?.invoice;
+      if (action === "accepted" && inv?.id) {
+        setCreatedInvoice({
+          id: inv.id,
+          invoice_number: inv.invoice_number || inv.id,
+        });
+        flash(
+          `Quotation accepted; draft invoice ${inv.invoice_number || ""} created.`,
+        );
+      } else {
+        setCreatedInvoice(null);
+        flash(`Marked ${action}.`);
+      }
       load();
     } catch (err: any) {
       flashError(err?.message || `Failed to mark ${action}.`);
@@ -177,11 +198,12 @@ export default function QuotationDetailPage() {
   const isOpen = status === "draft" || status === "sent";
   const isTerminal =
     status === "converted" || status === "cancelled" || status === "rejected";
-  const canEdit = status !== "converted" && status !== "cancelled";
-  const canSend = status === "draft" || status === "sent";
-  const canMark = isOpen;
-  const canConvert = !isTerminal && status !== "rejected";
-  const canDelete = status !== "converted";
+  const statusAllowsEdit = status !== "converted" && status !== "cancelled";
+  const canSend = (status === "draft" || status === "sent") && mayEdit;
+  const canMark = isOpen && mayEdit;
+  const canConvert = !isTerminal && status !== "rejected" && mayEdit;
+  const canDelete = status !== "converted" && mayEdit;
+  const showEditLink = statusAllowsEdit && mayEdit;
 
   const items: any[] = Array.isArray(quotation.quotation_items)
     ? quotation.quotation_items
@@ -196,7 +218,7 @@ export default function QuotationDetailPage() {
         description="Quotation details and actions."
         actions={
           <>
-            {canEdit ? (
+            {showEditLink ? (
               <Link href={`/quotations/${id}/edit`}>
                 <Button variant="secondary">Edit</Button>
               </Link>
@@ -262,7 +284,15 @@ export default function QuotationDetailPage() {
 
       {actionMsg ? (
         <div className="mb-4 rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-700">
-          {actionMsg}
+          <div>{actionMsg}</div>
+          {createdInvoice ? (
+            <Link
+              href={`/invoices/${createdInvoice.id}`}
+              className="mt-1 inline-block font-semibold underline"
+            >
+              Open invoice →
+            </Link>
+          ) : null}
         </div>
       ) : null}
       {infoMsg ? (

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { apiGet } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { canEdit as canEditModule } from "@/lib/auth";
 import StatusBadge from "@/components/StatusBadge";
 import {
   Button,
@@ -37,6 +38,11 @@ export default function InvoicesPage() {
   const [search, setSearch] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+
+  const [mayEdit, setMayEdit] = useState(false);
+  useEffect(() => {
+    setMayEdit(canEditModule("invoices"));
+  }, []);
 
   async function load() {
     setLoading(true);
@@ -84,9 +90,11 @@ export default function InvoicesPage() {
         title="Invoices"
         description="Create, track and manage customer invoices."
         actions={
-          <Link href="/invoices/create">
-            <Button>+ New Invoice</Button>
-          </Link>
+          mayEdit ? (
+            <Link href="/invoices/create">
+              <Button>+ New Invoice</Button>
+            </Link>
+          ) : null
         }
       />
 

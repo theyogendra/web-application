@@ -282,14 +282,18 @@ router.get('/:id/pdf', async (req, res, next) => {
 });
 
 // POST /quotations/:id/mark-accepted
-router.post('/:id/mark-accepted', requirePermission('quotations.update'), async (req, res, next) => {
+// Workflow: marking a quotation accepted is the quotation team's approval —
+// it immediately spawns a linked draft Invoice for the invoice team to review.
+router.post('/:id/mark-accepted', requirePermission('quotations.approve'), async (req, res, next) => {
   try {
+    const userId = req.user ? req.user.id : null;
     const { data: existing } = await supabase.from('quotations').select('*').eq('id', req.params.id).maybeSingle();
     if (!existing) return res.status(404).json({ success: false, message: 'Quotation not found' });
     if (!['draft', 'sent'].includes(existing.status)) {
       return res.status(400).json({ success: false, message: `Cannot accept a ${existing.status} quotation` });
     }
 
+    // 1. Mark quotation accepted
     const { data: row, error } = await supabase
       .from('quotations').update({ status: 'accepted', accepted_at: new Date().toISOString() })
       .eq('id', req.params.id).select().single();
@@ -299,7 +303,31 @@ router.post('/:id/mark-accepted', requirePermission('quotations.update'), async 
       req, action: 'quotation_accepted', module: 'Quotations',
       entityType: 'quotation', entityId: row.id, oldData: existing, newData: row
     });
-    res.json({ success: true, data: row });
+
+    // 2. Auto-convert to invoice. The convert RPC will flip the quotation
+    //    status to 'converted' which supersedes 'accepted' as the terminal
+    //    state; that's intentional — the working doc is the invoice now.
+    let invoice = null;
+    try {
+      const { data: convResult, error: convErr } = await supabase.rpc('convert_quotation_to_invoice', {
+        quotation_id_input: req.params.id,
+        due_date_input: req.body.due_date || null,
+        user_id_input: userId
+      });
+      if (convErr) throw convErr;
+      if (convResult && convResult.success) {
+        ({ data: invoice } = await supabase.from('invoices').select('*').eq('id', convResult.invoice_id).maybeSingle());
+        await createAuditLog({
+          req, action: 'quotation_converted_to_invoice', module: 'Quotations',
+          entityType: 'quotation', entityId: req.params.id,
+          details: { invoice_id: convResult.invoice_id, invoice_number: convResult.invoice_number, auto: true }
+        });
+      }
+    } catch (convErr) {
+      console.error('Auto-conversion to invoice failed:', convErr.message);
+    }
+
+    res.json({ success: true, data: row, invoice });
   } catch (err) {
     next(err);
   }

@@ -84,6 +84,16 @@ export default function ProductForm({
       setError("Product name is required.");
       return;
     }
+    const costNum = Number(values.cost);
+    if (!isFinite(costNum) || costNum < 0) {
+      setError("Cost must be a non-negative number.");
+      return;
+    }
+    const taxNum = Number(values.tax_rate);
+    if (!isFinite(taxNum) || taxNum < 0) {
+      setError("GST % must be a non-negative number.");
+      return;
+    }
 
     const payload = {
       name: values.name,
@@ -170,20 +180,30 @@ export default function ProductForm({
               onChange={(e) => setField("price", e.target.value)}
             />
           </Field>
-          <Field label="Cost">
+          <Field
+            label="Cost"
+            required
+            hint="Your purchase price (used for margin reporting)."
+          >
             <TextInput
               type="number"
               min="0"
               step="any"
+              required
               value={values.cost}
               onChange={(e) => setField("cost", e.target.value)}
             />
           </Field>
-          <Field label="Tax rate (%)">
+          <Field
+            label="GST %"
+            required
+            hint="Default tax applied when this item is on a proposal/quotation/invoice line."
+          >
             <TextInput
               type="number"
               min="0"
               step="any"
+              required
               value={values.tax_rate}
               onChange={(e) => setField("tax_rate", e.target.value)}
             />

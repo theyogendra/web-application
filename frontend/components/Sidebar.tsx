@@ -2,11 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
+import { isStaff } from "@/lib/auth";
 
 type NavItem = {
   href: string;
   label: string;
   icon: keyof typeof ICONS;
+  staffOnly?: boolean;
 };
 
 const NAV: NavItem[] = [
@@ -16,7 +19,8 @@ const NAV: NavItem[] = [
   { href: "/quotations", label: "Quotations", icon: "fileText" },
   { href: "/invoices", label: "Invoices", icon: "receipt" },
   { href: "/payments", label: "Payments", icon: "creditCard" },
-  { href: "/audit-logs", label: "Audit Logs", icon: "activity" },
+  { href: "/audit-logs", label: "Audit Logs", icon: "activity", staffOnly: true },
+  { href: "/users", label: "Users", icon: "users", staffOnly: true },
 ];
 
 // Inline outline icons (Lucide-style strokes) — no extra dependencies.
@@ -63,6 +67,14 @@ const ICONS = {
       <line x1="6" x2="6" y1="20" y2="16" />
     </>
   ),
+  users: (
+    <>
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </>
+  ),
 } as const;
 
 function Icon({ name }: { name: NavItem["icon"] }) {
@@ -83,6 +95,14 @@ function Icon({ name }: { name: NavItem["icon"] }) {
 
 export default function Sidebar() {
   const pathname = usePathname() || "";
+  // Avoid hydration mismatch — auth state lives in localStorage, which is only
+  // available on the client. Render the staff-only links after mount.
+  const [staff, setStaff] = useState(false);
+  useEffect(() => {
+    setStaff(isStaff());
+  }, [pathname]);
+
+  const visibleNav = NAV.filter((item) => !item.staffOnly || staff);
 
   return (
     <aside className="flex w-60 shrink-0 flex-col bg-ink-900 text-ink-100">
@@ -100,7 +120,7 @@ export default function Sidebar() {
       </div>
 
       <nav className="flex-1 space-y-0.5 p-3">
-        {NAV.map((item) => {
+        {visibleNav.map((item) => {
           const active =
             pathname === item.href || pathname.startsWith(item.href + "/");
           return (

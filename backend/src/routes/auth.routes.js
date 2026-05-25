@@ -37,8 +37,24 @@ function clearAuthCookies(res) {
 const multer = require('multer');
 const upload = multer();
 
+// Per-user module access map { module: 'view' | 'edit', ... }.
+async function loadModuleAccess(userId) {
+  if (!userId) return {};
+  const { data, error } = await supabase
+    .from('user_module_access')
+    .select('module, access_level')
+    .eq('user_id', userId);
+  if (error) {
+    console.error('Failed to load module access:', error.message);
+    return {};
+  }
+  const out = {};
+  for (const row of data || []) out[row.module] = row.access_level;
+  return out;
+}
+
 // Public shape of a user — never leak the password / hash.
-function publicUser(user, role) {
+function publicUser(user, role, moduleAccess) {
   return {
     id: user.id,
     email: user.email,
@@ -49,6 +65,7 @@ function publicUser(user, role) {
     is_superuser: !!user.is_superuser,
     role: role ? { id: role.id, name: role.name, description: role.description } : null,
     permissions: role && Array.isArray(role.permissions) ? role.permissions : [],
+    module_access: moduleAccess || {},
     last_login_at: user.last_login_at || null,
     created_at: user.created_at
   };
@@ -101,6 +118,7 @@ router.post('/login', upload.none(), async (req, res, next) => {
     }
 
     const role = user.roles || null;
+    const moduleAccess = await loadModuleAccess(user.id);
 
     const access_token = jwt.sign(
       {
@@ -108,6 +126,7 @@ router.post('/login', upload.none(), async (req, res, next) => {
         email: user.email,
         role: role ? role.name : null,
         permissions: role && Array.isArray(role.permissions) ? role.permissions : [],
+        module_access: moduleAccess,
         is_superuser: !!user.is_superuser
       },
       env.JWT_SECRET,
@@ -139,7 +158,7 @@ router.post('/login', upload.none(), async (req, res, next) => {
       access_token,
       refresh_token: 'dummy_refresh_token',
       token_type: 'bearer',
-      user: publicUser(user, role)
+      user: publicUser(user, role, moduleAccess)
     });
   } catch (err) {
     next(err);
@@ -158,7 +177,8 @@ router.get('/me', authenticate, async (req, res, next) => {
       return res.status(404).json({ detail: 'User not found' });
     }
 
-    res.json(publicUser(user, user.roles || null));
+    const moduleAccess = await loadModuleAccess(user.id);
+    res.json(publicUser(user, user.roles || null, moduleAccess));
   } catch (err) {
     next(err);
   }

@@ -11,6 +11,7 @@ import {
 } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { computeLineTotal } from "@/lib/totals";
+import { canEdit as canEditModule } from "@/lib/auth";
 import StatusBadge from "@/components/StatusBadge";
 import {
   Button,
@@ -37,6 +38,11 @@ export default function ProposalDetailPage() {
   const [busy, setBusy] = useState<string | null>(null);
 
   const [showConvert, setShowConvert] = useState(false);
+
+  const [mayEdit, setMayEdit] = useState(false);
+  useEffect(() => {
+    setMayEdit(canEditModule("proposals"));
+  }, []);
 
   async function load() {
     setLoading(true);
@@ -174,11 +180,12 @@ export default function ProposalDetailPage() {
   const isOpen = status === "draft" || status === "sent";
   const isTerminal =
     status === "converted" || status === "cancelled" || status === "rejected";
-  const canEdit = status !== "converted" && status !== "cancelled";
-  const canSend = status === "draft" || status === "sent";
-  const canMark = isOpen;
-  const canConvert = !isTerminal;
-  const canDelete = status !== "converted";
+  const statusAllowsEdit = status !== "converted" && status !== "cancelled";
+  const canSend = (status === "draft" || status === "sent") && mayEdit;
+  const canMark = isOpen && mayEdit;
+  const canConvert = !isTerminal && mayEdit;
+  const canDelete = status !== "converted" && mayEdit;
+  const showEditLink = statusAllowsEdit && mayEdit;
 
   const items: any[] = Array.isArray(proposal.proposal_items)
     ? proposal.proposal_items
@@ -192,7 +199,7 @@ export default function ProposalDetailPage() {
         description="Proposal details and actions."
         actions={
           <>
-            {canEdit ? (
+            {showEditLink ? (
               <Link href={`/proposals/${id}/edit`}>
                 <Button variant="secondary">Edit</Button>
               </Link>

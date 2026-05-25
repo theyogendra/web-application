@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { apiGet, downloadFile } from "@/lib/api";
 import { formatDateTime, titleCase } from "@/lib/format";
+import { isStaff } from "@/lib/auth";
 import {
   Button,
   Card,
@@ -33,6 +35,8 @@ const MODULES = [
 ];
 
 export default function AuditLogsPage() {
+  const router = useRouter();
+  const [allowed, setAllowed] = useState(false);
   const [logs, setLogs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,6 +47,16 @@ export default function AuditLogsPage() {
   const [search, setSearch] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+
+  // Audit Logs is staff-only. Non-staff get bounced to /invoices to avoid a
+  // flash of forbidden content (the backend also 403s the API).
+  useEffect(() => {
+    if (!isStaff()) {
+      router.replace("/invoices");
+      return;
+    }
+    setAllowed(true);
+  }, [router]);
 
   function buildParams() {
     const params = new URLSearchParams();
@@ -71,9 +85,9 @@ export default function AuditLogsPage() {
   }
 
   useEffect(() => {
-    load();
+    if (allowed) load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [allowed]);
 
   function applyFilters(e: React.FormEvent) {
     e.preventDefault();
@@ -102,6 +116,10 @@ export default function AuditLogsPage() {
     } finally {
       setExporting(false);
     }
+  }
+
+  if (!allowed) {
+    return <Loading label="Redirecting..." />;
   }
 
   return (

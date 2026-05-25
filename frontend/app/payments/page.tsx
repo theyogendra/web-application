@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { apiGet, downloadFile } from "@/lib/api";
 import { formatCurrency, formatDate, titleCase } from "@/lib/format";
 import {
@@ -26,7 +27,43 @@ const PAYMENT_METHODS = [
   { value: "online", label: "Online" },
 ];
 
+function ApprovalBadge({ status }: { status?: string }) {
+  const key = (status || "").toLowerCase();
+  if (!key) return <span className="text-xs text-gray-400">—</span>;
+  const styles: Record<string, { pill: string; dot: string; label: string }> = {
+    pending: {
+      pill: "bg-amber-50 text-amber-800",
+      dot: "bg-amber-500",
+      label: "Pending",
+    },
+    approved: {
+      pill: "bg-emerald-50 text-emerald-700",
+      dot: "bg-emerald-500",
+      label: "Approved",
+    },
+    rejected: {
+      pill: "bg-red-50 text-red-700",
+      dot: "bg-red-500",
+      label: "Rejected",
+    },
+  };
+  const s = styles[key] || {
+    pill: "bg-ink-100 text-ink-600",
+    dot: "bg-ink-400",
+    label: titleCase(key),
+  };
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${s.pill}`}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
+      {s.label}
+    </span>
+  );
+}
+
 export default function PaymentsPage() {
+  const router = useRouter();
   const [payments, setPayments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -177,7 +214,7 @@ export default function PaymentsPage() {
           <EmptyState message="No payments found." />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[820px] text-sm">
+            <table className="w-full min-w-[920px] text-sm">
               <thead>
                 <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs uppercase tracking-wide text-gray-500">
                   <th className="px-4 py-3">Payment #</th>
@@ -186,6 +223,7 @@ export default function PaymentsPage() {
                   <th className="px-4 py-3 text-right">Amount</th>
                   <th className="px-4 py-3">Method</th>
                   <th className="px-4 py-3">Date</th>
+                  <th className="px-4 py-3">Approval</th>
                   <th className="px-4 py-3">Reference</th>
                 </tr>
               </thead>
@@ -193,12 +231,16 @@ export default function PaymentsPage() {
                 {payments.map((p) => (
                   <tr
                     key={p.id}
-                    className="border-b border-gray-100 hover:bg-gray-50"
+                    onClick={() => router.push(`/payments/${p.id}`)}
+                    className="cursor-pointer border-b border-gray-100 hover:bg-blue-50"
                   >
                     <td className="px-4 py-3 font-medium text-gray-900">
                       {p.payment_number}
                     </td>
-                    <td className="px-4 py-3">
+                    <td
+                      className="px-4 py-3"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       {p.invoice_id ? (
                         <Link
                           href={`/invoices/${p.invoice_id}`}
@@ -221,6 +263,9 @@ export default function PaymentsPage() {
                     </td>
                     <td className="px-4 py-3 text-gray-600">
                       {formatDate(p.payment_date)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <ApprovalBadge status={p.approval_status} />
                     </td>
                     <td className="px-4 py-3 text-gray-600">
                       {p.reference_number || "-"}

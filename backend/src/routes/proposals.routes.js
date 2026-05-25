@@ -93,14 +93,42 @@ router.post('/', requirePermission('proposals.create'), async (req, res, next) =
       return res.status(400).json(result || { success: false, message: 'Create failed' });
     }
 
-    const { data: row } = await supabase.from('proposals').select('*').eq('id', result.proposal_id).maybeSingle();
+    let row;
+    ({ data: row } = await supabase.from('proposals').select('*').eq('id', result.proposal_id).maybeSingle());
 
     await createAuditLog({
       req, action: 'proposal_created', module: 'Proposals',
       entityType: 'proposal', entityId: result.proposal_id, newData: row
     });
 
-    res.status(201).json({ success: true, data: row });
+    // Workflow: a new proposal immediately spawns a linked draft quotation
+    // so the quotation team picks it up for review.
+    let quotation = null;
+    try {
+      const { data: convResult, error: convErr } = await supabase.rpc('convert_proposal_to_quotation', {
+        proposal_id_input: result.proposal_id,
+        valid_until_input: req.body.valid_until || null,
+        user_id_input: userId
+      });
+      if (convErr) throw convErr;
+      if (convResult && convResult.success) {
+        ({ data: quotation } = await supabase.from('quotations').select('*').eq('id', convResult.quotation_id).maybeSingle());
+        // Refresh the proposal row — the convert RPC marked it as 'converted'.
+        ({ data: row } = await supabase.from('proposals').select('*').eq('id', result.proposal_id).maybeSingle());
+
+        await createAuditLog({
+          req, action: 'proposal_converted_to_quotation', module: 'Proposals',
+          entityType: 'proposal', entityId: result.proposal_id,
+          details: { quotation_id: convResult.quotation_id, quotation_number: convResult.quotation_number, auto: true }
+        });
+      }
+    } catch (convErr) {
+      console.error('Auto-conversion to quotation failed:', convErr.message);
+      // The proposal still exists — caller will see proposal in response and
+      // can retry conversion manually via /convert-to-quotation.
+    }
+
+    res.status(201).json({ success: true, data: row, quotation });
   } catch (err) {
     next(err);
   }

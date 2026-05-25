@@ -86,4 +86,35 @@ const requirePermission = (permissionName) => {
   };
 };
 
-module.exports = { authenticate, optionalAuth, requirePermission, decodeUserFromToken };
+// requireModuleAccess(module, level) -- enforces per-user module access
+// (Employee role uses user_module_access). Admin / Manager / is_superuser
+// bypass. Level is 'view' or 'edit'; edit also satisfies view.
+function requireModuleAccess(module, level = 'view') {
+  return (req, res, next) => {
+    if (!req.user) {
+      if (String(process.env.REQUIRE_AUTH).toLowerCase() === 'true') {
+        return res.status(401).json({ detail: 'Authentication required' });
+      }
+      return next();
+    }
+    if (req.user.is_superuser) return next();
+    const roleName = req.user.role || '';
+    if (roleName === 'Admin' || roleName === 'Manager') return next();
+
+    const access = req.user.module_access || {};
+    const granted = access[module];                  // 'edit' | 'view' | undefined
+    const ok = level === 'view'
+      ? granted === 'view' || granted === 'edit'
+      : granted === 'edit';
+    if (ok) return next();
+
+    return res.status(403).json({
+      detail: `You do not have ${level} access to ${module}`,
+      module, required: level
+    });
+  };
+}
+
+module.exports = {
+  authenticate, optionalAuth, requirePermission, requireModuleAccess, decodeUserFromToken
+};

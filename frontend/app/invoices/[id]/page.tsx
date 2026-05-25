@@ -16,6 +16,7 @@ import {
   todayInputValue,
 } from "@/lib/format";
 import { computeLineTotal } from "@/lib/totals";
+import { canEdit as canEditModule } from "@/lib/auth";
 import StatusBadge from "@/components/StatusBadge";
 import {
   Button,
@@ -28,6 +29,41 @@ import {
   TextArea,
   TextInput,
 } from "@/components/ui";
+
+function ApprovalBadge({ status }: { status?: string }) {
+  const key = (status || "").toLowerCase();
+  if (!key) return <span className="text-xs text-gray-400">—</span>;
+  const styles: Record<string, { pill: string; dot: string; label: string }> = {
+    pending: {
+      pill: "bg-amber-50 text-amber-800",
+      dot: "bg-amber-500",
+      label: "Pending",
+    },
+    approved: {
+      pill: "bg-emerald-50 text-emerald-700",
+      dot: "bg-emerald-500",
+      label: "Approved",
+    },
+    rejected: {
+      pill: "bg-red-50 text-red-700",
+      dot: "bg-red-500",
+      label: "Rejected",
+    },
+  };
+  const s = styles[key] || {
+    pill: "bg-ink-100 text-ink-600",
+    dot: "bg-ink-400",
+    label: key.charAt(0).toUpperCase() + key.slice(1),
+  };
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium ${s.pill}`}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${s.dot}`} />
+      {s.label}
+    </span>
+  );
+}
 
 const PAYMENT_METHODS = [
   { value: "cash", label: "Cash" },
@@ -52,6 +88,13 @@ export default function InvoiceDetailPage() {
   const [busy, setBusy] = useState<string | null>(null);
 
   const [showPayment, setShowPayment] = useState(false);
+
+  const [mayEditInvoices, setMayEditInvoices] = useState(false);
+  const [mayEditPayments, setMayEditPayments] = useState(false);
+  useEffect(() => {
+    setMayEditInvoices(canEditModule("invoices"));
+    setMayEditPayments(canEditModule("payments"));
+  }, []);
 
   async function load() {
     setLoading(true);
@@ -121,6 +164,24 @@ export default function InvoiceDetailPage() {
     }
   }
 
+  async function handleApprove() {
+    setBusy("approve");
+    try {
+      const res = await apiPost(`/invoices/${id}/approve`, { remarks: "" });
+      if (res && res.success === false) {
+        throw new Error(res.message || "Failed to approve invoice.");
+      }
+      flash(res?.message || "Invoice approved.");
+      load();
+    } catch (err: any) {
+      // The legacy approval endpoint 400s with "no approval rule" when none is
+      // configured — surface the message verbatim.
+      flashError(err?.message || "Failed to approve invoice.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function handleDelete() {
     if (
       !window.confirm(
@@ -178,16 +239,20 @@ export default function InvoiceDetailPage() {
         description="Invoice details, payments and actions."
         actions={
           <>
-            <Link href={`/invoices/${id}/edit`}>
-              <Button variant="secondary">Edit</Button>
-            </Link>
-            <Button
-              variant="secondary"
-              onClick={handleSend}
-              disabled={busy !== null}
-            >
-              {busy === "send" ? "Sending..." : "Send"}
-            </Button>
+            {mayEditInvoices ? (
+              <Link href={`/invoices/${id}/edit`}>
+                <Button variant="secondary">Edit</Button>
+              </Link>
+            ) : null}
+            {mayEditInvoices ? (
+              <Button
+                variant="secondary"
+                onClick={handleSend}
+                disabled={busy !== null}
+              >
+                {busy === "send" ? "Sending..." : "Send"}
+              </Button>
+            ) : null}
             <Button
               variant="secondary"
               onClick={handlePdf}
@@ -195,20 +260,35 @@ export default function InvoiceDetailPage() {
             >
               {busy === "pdf" ? "Preparing..." : "Download PDF"}
             </Button>
-            <Button
-              variant="secondary"
-              onClick={handleReminder}
-              disabled={busy !== null}
-            >
-              {busy === "reminder" ? "Sending..." : "Send Reminder"}
-            </Button>
-            <Button
-              variant="danger"
-              onClick={handleDelete}
-              disabled={busy !== null}
-            >
-              {busy === "delete" ? "Deleting..." : "Delete / Cancel"}
-            </Button>
+            {mayEditInvoices ? (
+              <Button
+                variant="secondary"
+                onClick={handleReminder}
+                disabled={busy !== null}
+              >
+                {busy === "reminder" ? "Sending..." : "Send Reminder"}
+              </Button>
+            ) : null}
+            {mayEditInvoices &&
+            ["draft", "sent", "submitted"].includes(
+              (invoice.status || "").toLowerCase(),
+            ) ? (
+              <Button
+                onClick={handleApprove}
+                disabled={busy !== null}
+              >
+                {busy === "approve" ? "Approving..." : "Approve"}
+              </Button>
+            ) : null}
+            {mayEditInvoices ? (
+              <Button
+                variant="danger"
+                onClick={handleDelete}
+                disabled={busy !== null}
+              >
+                {busy === "delete" ? "Deleting..." : "Delete / Cancel"}
+              </Button>
+            ) : null}
           </>
         }
       />
@@ -398,18 +478,21 @@ export default function InvoiceDetailPage() {
           <h2 className="text-base font-semibold text-gray-900">
             Payments
           </h2>
-          <Button onClick={() => setShowPayment(true)}>
-            Record Payment
-          </Button>
+          {mayEditPayments ? (
+            <Button onClick={() => setShowPayment(true)}>
+              Record Payment
+            </Button>
+          ) : null}
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px] text-sm">
+          <table className="w-full min-w-[640px] text-sm">
             <thead>
               <tr className="border-b border-gray-200 text-left text-xs uppercase tracking-wide text-gray-500">
                 <th className="py-2 pr-3">Payment #</th>
                 <th className="py-2 px-2">Date</th>
                 <th className="py-2 px-2">Method</th>
                 <th className="py-2 px-2">Reference</th>
+                <th className="py-2 px-2">Approval</th>
                 <th className="py-2 pl-2 text-right">Amount</th>
               </tr>
             </thead>
@@ -417,7 +500,7 @@ export default function InvoiceDetailPage() {
               {payments.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={5}
+                    colSpan={6}
                     className="py-4 text-center text-sm text-gray-400"
                   >
                     No payments recorded yet.
@@ -425,7 +508,15 @@ export default function InvoiceDetailPage() {
                 </tr>
               ) : (
                 payments.map((p, idx) => (
-                  <tr key={idx} className="border-b border-gray-100">
+                  <tr
+                    key={idx}
+                    onClick={() =>
+                      p.id ? router.push(`/payments/${p.id}`) : null
+                    }
+                    className={`border-b border-gray-100 ${
+                      p.id ? "cursor-pointer hover:bg-blue-50" : ""
+                    }`}
+                  >
                     <td className="py-2 pr-3 text-gray-900">
                       {p.payment_number}
                     </td>
@@ -437,6 +528,9 @@ export default function InvoiceDetailPage() {
                     </td>
                     <td className="py-2 px-2 text-gray-600">
                       {p.reference_number || "-"}
+                    </td>
+                    <td className="py-2 px-2">
+                      <ApprovalBadge status={p.approval_status} />
                     </td>
                     <td className="py-2 pl-2 text-right font-medium text-gray-900">
                       {formatCurrency(p.amount)}
@@ -512,7 +606,8 @@ function RecordPaymentModal({
         // Overpayment / validation errors come back here too.
         throw new Error(res.message || "Failed to record payment.");
       }
-      onSuccess(res?.message || "Payment recorded successfully.");
+      // Payments now enter the workflow as `pending` and require approval.
+      onSuccess(res?.message || "Payment recorded; awaiting approval.");
     } catch (err: any) {
       // HTTP 400 overpayment message is surfaced via err.message.
       setError(err?.message || "Failed to record payment.");

@@ -4,8 +4,38 @@ Full-stack invoicing, payments and reporting app.
 
 - **Backend** — Express 5 + Supabase Postgres, JWT (Bearer **or** HttpOnly cookie + CSRF), bcrypt passwords, atomic Postgres RPCs for document conversion and create/update, audit log with dead-letter queue.
 - **Frontend** — Next.js 14 (App Router) + TypeScript + Tailwind, dark sidebar, Inter font, server-rendered + client-side hybrid.
-- **Document chain** — Inventory → Proposal → Quotation → Invoice → Payment, with one-click conversion at each stage.
+- **Workflow** — Inventory → Proposal → Quotation → Invoice → Payment, automatic at each hand-off, manual review/approval at each stage. Inventory stock auto-deducts on payment approval.
 - **PDF + email** — PDFKit-rendered invoices/quotations/proposals, Resend transactional email.
+
+## Workflow
+
+```
+                        +-- approve ---> auto-create -->
+   Proposal create -->  Quotation       Invoice       Payment record
+                        (review+edit)  (approve)     (approve)
+                                                       |
+                                                       v
+                                              invoice marked paid
+                                              + inventory deducted
+```
+
+1. **Create Proposal** — an Employee with `proposals.edit` access picks the customer + inventory items. The backend immediately spawns a linked **Draft Quotation** (the proposal is marked `converted` and becomes the audit record of where it started).
+2. **Review Quotation** — Quotations team edits line items / prices / valid_until, then clicks **Mark Accepted**. The quotation flips to `accepted` and a linked **Draft Invoice** is auto-created.
+3. **Approve Invoice** — Invoice team clicks **Approve** on the invoice detail page. Status moves to `approved`. Now payments can be recorded.
+4. **Record Payment** — payment row is inserted with `approval_status='pending'`. The invoice is NOT yet credited.
+5. **Approve Payment** — Accountant clicks **Approve** on the payment detail page. The Postgres RPC recalculates the invoice (status → `partially_paid` or `paid`) AND deducts stock from every line item referencing a product, logging each move into `stock_movements`.
+
+Every step writes an audit-log row. The audit table includes a dead-letter queue (`audit_logs_failed`) for any writes that fail.
+
+## Roles
+
+| Role | Users | Audit Logs | Inventory / Proposals / Quotations / Invoices / Payments |
+|---|---|---|---|
+| **Admin** | full CRUD + module assignment | view + export | full CRUD + approve everywhere |
+| **Manager** | view-only | view + export | full CRUD + approve everywhere |
+| **Employee** | hidden | hidden | per-module: `view` (read-only) or `edit` (full CRUD on assigned modules); other modules are read-only |
+
+Employee module assignment is per-user, stored in `user_module_access`. An Employee with `inventory.edit` + `proposals.view` can add inventory items and create proposals from them, but everything else is read-only. Admins manage this via **Users → New / Edit User** in the UI.
 
 ---
 
@@ -68,6 +98,7 @@ The schema lives in [`supabase/migrations/`](supabase/migrations/), eight files 
 | `20260522140000_inventory_quotations_proposals_phase6.sql` | product enhancements, quotations + items, proposals + items, conversion FKs |
 | `20260522150000_convert_rpcs_phase7.sql` | atomic `convert_proposal_to_quotation` and `convert_quotation_to_invoice` RPCs |
 | `20260522160000_atomic_crud_audit_dlq_phase8.sql` | audit_logs_failed dead-letter, 6 atomic create/update RPCs, 6 reports SQL aggregations |
+| `20260522170000_workflow_roles_phase9.sql` | user_module_access table, Employee role, refreshed Admin/Manager perms, payment approval columns + RPCs (record/approve/reject), inventory deduction on full payment |
 
 ### Apply with the Supabase CLI (recommended)
 
@@ -156,6 +187,16 @@ GET    /api/payments/export                 CSV
 
 POST   /api/quotations/:id/convert-to-invoice   atomic RPC
 POST   /api/proposals/:id/convert-to-quotation  atomic RPC
+
+POST   /api/quotations/:id/mark-accepted        approves + auto-creates linked invoice
+POST   /api/invoices/:id/approve                approval workflow (legacy + phase 9)
+POST   /api/payments/:id/approve                accountant approval + invoice recalc + inventory deduction
+POST   /api/payments/:id/reject
+
+GET    /api/users                               admin/manager
+POST   /api/users                               admin: create user + module_access
+PUT    /api/users/:id                           admin: edit (incl. role + module_access)
+DELETE /api/users/:id                           admin: deactivate
 
 GET    /api/reports/summary                 all KPIs in one SQL call
 GET    /api/reports/revenue

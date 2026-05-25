@@ -1,12 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../config/supabase');
-const { optionalAuth } = require('../middleware/auth.middleware');
+const { optionalAuth, requirePermission } = require('../middleware/auth.middleware');
 const { createAuditLog } = require('../services/audit.service');
 const { toCsv } = require('../utils/csv');
 const { sanitizeSearch } = require('../utils/escape');
 
 router.use(optionalAuth);
+// Audit logs are Admin/Manager only (any role missing `audit_logs.read` is
+// rejected). Employees never see this module.
+router.use(requirePermission('audit_logs.read'));
 
 function applyFilters(q, query) {
   const { module, action, user_id, from, to } = query;

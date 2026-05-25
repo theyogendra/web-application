@@ -11,6 +11,7 @@ export type AuthUser = {
   is_superuser?: boolean;
   role?: { id: string; name: string; description?: string } | null;
   permissions?: string[];
+  module_access?: Record<string, "view" | "edit"> | null;
   [k: string]: any;
 };
 
@@ -49,4 +50,44 @@ export function hasPermission(perm: string): boolean {
   if (!user) return false;
   if (user.is_superuser) return true;
   return Array.isArray(user.permissions) && user.permissions.includes(perm);
+}
+
+// Role helpers --------------------------------------------------------------
+// These mirror the backend rules so the UI hides affordances the user can't
+// use. The backend still enforces access; this is purely cosmetic.
+
+export function isAdmin(): boolean {
+  const user = getUser();
+  if (!user) return false;
+  if (user.is_superuser) return true;
+  return user.role?.name === "Admin";
+}
+
+export function isManager(): boolean {
+  const user = getUser();
+  if (!user) return false;
+  return user.role?.name === "Manager";
+}
+
+export function isStaff(): boolean {
+  return isAdmin() || isManager();
+}
+
+// `canView` is intentionally permissive: any authenticated session can hit a
+// module page; if the backend doesn't want them seeing the data it returns 403
+// and the page renders an ErrorState. We don't try to hide whole pages here.
+export function canView(_module: string): boolean {
+  const user = getUser();
+  return !!user;
+}
+
+// `canEdit` controls the create/edit/delete affordances on each module page.
+// Admin/Manager always pass (Manager has full edit on these five modules).
+// Employees need an explicit `module_access[m] === 'edit'`.
+export function canEdit(module: string): boolean {
+  const user = getUser();
+  if (!user) return false;
+  if (isStaff()) return true;
+  const access = user.module_access || {};
+  return access[module] === "edit";
 }

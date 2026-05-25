@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { apiGet } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/format";
+import { canEdit as canEditModule } from "@/lib/auth";
 import StatusBadge from "@/components/StatusBadge";
 import {
   Button,
@@ -38,6 +39,11 @@ export default function ProposalsPage() {
   const [search, setSearch] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+
+  const [mayEdit, setMayEdit] = useState(false);
+  useEffect(() => {
+    setMayEdit(canEditModule("proposals"));
+  }, []);
 
   async function load() {
     setLoading(true);
@@ -84,9 +90,11 @@ export default function ProposalsPage() {
         title="Proposals"
         description="Draft and send proposals to your customers."
         actions={
-          <Link href="/proposals/create">
-            <Button>+ New Proposal</Button>
-          </Link>
+          mayEdit ? (
+            <Link href="/proposals/create">
+              <Button>+ New Proposal</Button>
+            </Link>
+          ) : null
         }
       />
 
