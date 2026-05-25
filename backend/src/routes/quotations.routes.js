@@ -157,7 +157,41 @@ router.put('/:id', requirePermission('quotations.update'), async (req, res, next
   }
 });
 
+// Helper: when a quotation goes terminal (rejected/cancelled/deleted), the
+// upstream proposal that auto-spawned it should also be marked rejected so
+// the chain visibly dies.
+async function cascadeProposalRejection(quotation, reason, req) {
+  if (!quotation || !quotation.converted_from_proposal_id) return null;
+  const { data: parent } = await supabase
+    .from('proposals')
+    .select('id, status, proposal_number')
+    .eq('id', quotation.converted_from_proposal_id)
+    .maybeSingle();
+  if (!parent || parent.status !== 'converted') return null;  // already terminal independently
+
+  const userId = req.user ? req.user.id : null;
+  const { data: updated } = await supabase
+    .from('proposals')
+    .update({
+      status: 'rejected',
+      rejected_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      updated_by: userId
+    })
+    .eq('id', parent.id).select().single();
+
+  await createAuditLog({
+    req, action: 'proposal_cascade_rejected', module: 'Proposals',
+    entityType: 'proposal', entityId: parent.id,
+    details: { reason, quotation_id: quotation.id, quotation_number: quotation.quotation_number }
+  });
+
+  return updated;
+}
+
 // DELETE /quotations/:id  -- drafts hard-delete; everything else cancels.
+// Backward cascade: if the upstream proposal is still 'converted', mark it
+// rejected so it's visibly clear the chain died here.
 router.delete('/:id', requirePermission('quotations.delete'), async (req, res, next) => {
   try {
     const userId = req.user ? req.user.id : null;
@@ -167,26 +201,37 @@ router.delete('/:id', requirePermission('quotations.delete'), async (req, res, n
       return res.status(400).json({ success: false, message: 'A converted quotation cannot be deleted' });
     }
 
+    let cascadedProposal = null;
+
     if (existing.status === 'draft') {
       const { error } = await supabase.from('quotations').delete().eq('id', req.params.id);
       if (error) throw error;
+      cascadedProposal = await cascadeProposalRejection(existing, 'linked quotation deleted', req);
       await createAuditLog({
         req, action: 'quotation_deleted', module: 'Quotations',
         entityType: 'quotation', entityId: existing.id, oldData: existing
       });
-      return res.json({ success: true, message: 'Quotation deleted', deleted: true });
+      return res.json({ success: true, message: 'Quotation deleted', deleted: true, cascaded: cascadedProposal });
     }
 
     const { data: row, error } = await supabase
-      .from('quotations').update({ status: 'cancelled', updated_by: userId, updated_at: new Date().toISOString() })
+      .from('quotations').update({
+        status: 'cancelled',
+        rejected_at: existing.rejected_at || new Date().toISOString(),
+        updated_by: userId,
+        updated_at: new Date().toISOString()
+      })
       .eq('id', req.params.id).select().single();
     if (error) throw error;
 
+    cascadedProposal = await cascadeProposalRejection(existing, 'linked quotation cancelled', req);
+
     await createAuditLog({
       req, action: 'quotation_cancelled', module: 'Quotations',
-      entityType: 'quotation', entityId: existing.id, oldData: existing, newData: row
+      entityType: 'quotation', entityId: existing.id, oldData: existing, newData: row,
+      details: cascadedProposal ? { cascaded_proposal_id: cascadedProposal.id } : null
     });
-    res.json({ success: true, message: 'Quotation cancelled', data: row, deleted: false });
+    res.json({ success: true, message: 'Quotation cancelled', data: row, deleted: false, cascaded: cascadedProposal });
   } catch (err) {
     next(err);
   }
@@ -334,6 +379,8 @@ router.post('/:id/mark-accepted', requirePermission('quotations.approve'), async
 });
 
 // POST /quotations/:id/mark-rejected
+// Backward cascade: marking a quotation rejected also rejects the upstream
+// proposal (if still in 'converted' state) so the whole chain is visibly dead.
 router.post('/:id/mark-rejected', requirePermission('quotations.update'), async (req, res, next) => {
   try {
     const { data: existing } = await supabase.from('quotations').select('*').eq('id', req.params.id).maybeSingle();
@@ -347,11 +394,14 @@ router.post('/:id/mark-rejected', requirePermission('quotations.update'), async 
       .eq('id', req.params.id).select().single();
     if (error) throw error;
 
+    const cascadedProposal = await cascadeProposalRejection(existing, 'linked quotation rejected', req);
+
     await createAuditLog({
       req, action: 'quotation_rejected', module: 'Quotations',
-      entityType: 'quotation', entityId: row.id, oldData: existing, newData: row
+      entityType: 'quotation', entityId: row.id, oldData: existing, newData: row,
+      details: cascadedProposal ? { cascaded_proposal_id: cascadedProposal.id } : null
     });
-    res.json({ success: true, data: row });
+    res.json({ success: true, data: row, cascaded: cascadedProposal });
   } catch (err) {
     next(err);
   }

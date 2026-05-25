@@ -148,12 +148,38 @@ export default function ProductForm({
               placeholder="Services"
             />
           </Field>
-          <Field label="Unit">
+          <Field
+            label="Unit"
+            hint="Production / sales unit. Pick from suggestions or type your own."
+          >
             <TextInput
               value={values.unit}
               onChange={(e) => setField("unit", e.target.value)}
-              placeholder="hr / each / month"
+              placeholder="e.g. Piece, Kg, Hour, License"
+              list="product-units"
             />
+            <datalist id="product-units">
+              <option value="Piece" />
+              <option value="Each" />
+              <option value="Box" />
+              <option value="Pack" />
+              <option value="Carton" />
+              <option value="Set" />
+              <option value="Pair" />
+              <option value="Kg" />
+              <option value="Gram" />
+              <option value="Litre" />
+              <option value="mL" />
+              <option value="Metre" />
+              <option value="cm" />
+              <option value="Hour" />
+              <option value="Day" />
+              <option value="Month" />
+              <option value="Year" />
+              <option value="License" />
+              <option value="Service" />
+              <option value="Subscription" />
+            </datalist>
           </Field>
           <Field label="Description">
             <TextArea

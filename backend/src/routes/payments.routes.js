@@ -177,9 +177,10 @@ router.post('/', requirePermission('payments.create'), async (req, res, next) =>
   }
 });
 
-// POST /payments/:id/approve  -- Accountant approves. RPC flips status,
-// recalculates invoice totals, and (when this brings the invoice to fully
-// paid) deducts inventory stock + logs stock_movements.
+// POST /payments/:id/approve  -- Approver (Admin/Manager or any role granted
+// payments.approve) flips status, recalculates invoice totals, and (when this
+// brings the invoice to fully paid) deducts inventory stock + logs
+// stock_movements.
 router.post('/:id/approve', requirePermission('payments.approve'), async (req, res, next) => {
   try {
     const userId = req.user ? req.user.id : null;
@@ -242,7 +243,7 @@ router.post('/:id/approve', requirePermission('payments.approve'), async (req, r
   }
 });
 
-// POST /payments/:id/reject  -- Accountant rejects a pending payment.
+// POST /payments/:id/reject  -- Approver rejects a pending payment.
 router.post('/:id/reject', requirePermission('payments.approve'), async (req, res, next) => {
   try {
     const userId = req.user ? req.user.id : null;

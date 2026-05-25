@@ -657,13 +657,41 @@ router.post('/:id/cancel', requirePermission('invoices.update'), async (req, res
 
     if (updateError) throw updateError;
 
+    // Backward cascade: if this invoice came from a quotation that's still
+    // 'converted', flip the quotation to 'rejected' so the chain visibly dies.
+    let cascadedQuotation = null;
+    if (existing.converted_from_quotation_id) {
+      const { data: q } = await supabase
+        .from('quotations').select('id, status, quotation_number')
+        .eq('id', existing.converted_from_quotation_id).maybeSingle();
+      if (q && q.status === 'converted') {
+        const { data: cq } = await supabase
+          .from('quotations')
+          .update({
+            status: 'rejected',
+            rejected_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            updated_by: userId
+          })
+          .eq('id', q.id).select().single();
+        cascadedQuotation = cq;
+        await createAuditLog({
+          req, action: 'quotation_cascade_rejected', module: 'Quotations',
+          entityType: 'quotation', entityId: q.id,
+          details: { reason: 'linked invoice cancelled', invoice_id: existing.id }
+        });
+      }
+    }
+
     await createAuditLog({
-      userId, action: 'invoice_cancelled', entityType: 'invoice', entityId: id, oldData: existing, newData: updated, ipAddress: req.ip
+      userId, action: 'invoice_cancelled', entityType: 'invoice', entityId: id, oldData: existing, newData: updated, ipAddress: req.ip,
+      details: cascadedQuotation ? { cascaded_quotation_id: cascadedQuotation.id } : null
     });
 
     res.json({
       success: true,
-      data: updated
+      data: updated,
+      cascaded: cascadedQuotation
     });
   } catch (err) {
     next(err);
@@ -1033,6 +1061,31 @@ router.delete('/:id', requirePermission('invoices.delete'), async (req, res, nex
       return null;
     }
 
+    // Backward cascade helper: if this invoice came from a 'converted'
+    // quotation, mark the quotation rejected so the chain visibly dies.
+    async function cascadeQuotationRejection(reason) {
+      if (!existing.converted_from_quotation_id) return null;
+      const { data: q } = await supabase
+        .from('quotations').select('id, status, quotation_number')
+        .eq('id', existing.converted_from_quotation_id).maybeSingle();
+      if (!q || q.status !== 'converted') return null;
+      const { data: cq } = await supabase
+        .from('quotations')
+        .update({
+          status: 'rejected',
+          rejected_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          updated_by: userId
+        })
+        .eq('id', q.id).select().single();
+      await createAuditLog({
+        req, action: 'quotation_cascade_rejected', module: 'Quotations',
+        entityType: 'quotation', entityId: q.id,
+        details: { reason, invoice_id: existing.id }
+      });
+      return cq;
+    }
+
     if (existing.status === 'draft' && !hasPayments) {
       const stockErrMsg = await releaseHeldStock();
       if (stockErrMsg) {
@@ -1041,11 +1094,14 @@ router.delete('/:id', requirePermission('invoices.delete'), async (req, res, nex
       const { error: delErr } = await supabase.from('invoices').delete().eq('id', req.params.id);
       if (delErr) throw delErr;
 
+      const cascadedQuotation = await cascadeQuotationRejection('linked invoice deleted');
+
       await createAuditLog({
         req, action: 'invoice_deleted', module: 'Invoices',
-        entityType: 'invoice', entityId: existing.id, oldData: existing
+        entityType: 'invoice', entityId: existing.id, oldData: existing,
+        details: cascadedQuotation ? { cascaded_quotation_id: cascadedQuotation.id } : null
       });
-      return res.json({ success: true, message: 'Invoice deleted', deleted: true });
+      return res.json({ success: true, message: 'Invoice deleted', deleted: true, cascaded: cascadedQuotation });
     }
 
     const stockErrMsg = await releaseHeldStock();
@@ -1061,12 +1117,15 @@ router.delete('/:id', requirePermission('invoices.delete'), async (req, res, nex
       .single();
     if (updErr) throw updErr;
 
+    const cascadedQuotation = await cascadeQuotationRejection('linked invoice cancelled');
+
     await createAuditLog({
       req, action: 'invoice_cancelled', module: 'Invoices',
-      entityType: 'invoice', entityId: existing.id, oldData: existing, newData: updated
+      entityType: 'invoice', entityId: existing.id, oldData: existing, newData: updated,
+      details: cascadedQuotation ? { cascaded_quotation_id: cascadedQuotation.id } : null
     });
 
-    res.json({ success: true, message: 'Invoice cancelled', data: updated, deleted: false });
+    res.json({ success: true, message: 'Invoice cancelled', data: updated, deleted: false, cascaded: cascadedQuotation });
   } catch (err) {
     next(err);
   }

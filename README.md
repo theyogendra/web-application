@@ -34,8 +34,23 @@ Every step writes an audit-log row. The audit table includes a dead-letter queue
 | **Admin** | full CRUD + module assignment | view + export | full CRUD + approve everywhere |
 | **Manager** | view-only | view + export | full CRUD + approve everywhere |
 | **Employee** | hidden | hidden | per-module: `view` (read-only) or `edit` (full CRUD on assigned modules); other modules are read-only |
+| **Viewer** | hidden | hidden | read-only on all five modules + Reports |
 
-Employee module assignment is per-user, stored in `user_module_access`. An Employee with `inventory.edit` + `proposals.view` can add inventory items and create proposals from them, but everything else is read-only. Admins manage this via **Users → New / Edit User** in the UI.
+Employee module assignment is per-user, stored in `user_module_access`. An Employee with `inventory.edit` + `proposals.view` can add inventory items and create proposals from them, but everything else is read-only. Viewers see the same pages with all create/edit/delete affordances hidden. Admins manage this via **Users → New / Edit User** in the UI.
+
+The legacy **Accountant** role has been removed (phase 10 migration). Any user still on that role on an older DB gets `role_id = NULL` after the migration runs and must be reassigned.
+
+## Chain integrity (rejection cascades)
+
+The document chain has bidirectional cascade so a broken chain is visibly dead from any side you look at it:
+
+| Trigger | Effect |
+|---|---|
+| Proposal deleted / cancelled | Linked quotation (if still `draft` or `sent`) is automatically `rejected` |
+| Quotation rejected / cancelled / deleted | Upstream proposal (if still `converted`) is automatically marked `rejected` |
+| Invoice cancelled / deleted | Upstream quotation (if still `converted`) is automatically marked `rejected` |
+
+Every cascade writes a `*_cascade_rejected` audit log entry with the upstream/downstream ID + reason, so you can trace why a row went terminal.
 
 ---
 
@@ -99,6 +114,7 @@ The schema lives in [`supabase/migrations/`](supabase/migrations/), eight files 
 | `20260522150000_convert_rpcs_phase7.sql` | atomic `convert_proposal_to_quotation` and `convert_quotation_to_invoice` RPCs |
 | `20260522160000_atomic_crud_audit_dlq_phase8.sql` | audit_logs_failed dead-letter, 6 atomic create/update RPCs, 6 reports SQL aggregations |
 | `20260522170000_workflow_roles_phase9.sql` | user_module_access table, Employee role, refreshed Admin/Manager perms, payment approval columns + RPCs (record/approve/reject), inventory deduction on full payment |
+| `20260522180000_legacy_roles_cleanup_phase10.sql` | Removes Accountant role; restores Viewer as a clean read-only system role |
 
 ### Apply with the Supabase CLI (recommended)
 
