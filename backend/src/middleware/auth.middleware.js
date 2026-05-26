@@ -58,19 +58,12 @@ const optionalAuth = (req, res, next) => {
   next();
 };
 
-// requirePermission -- when a verified user attached, enforce permission
-// strings (Admin / is_superuser bypass). Anonymous requests are still let
-// through for backward compatibility with the current dev frontend; flip
-// REQUIRE_AUTH=true in env to harden once the frontend stops calling
-// protected endpoints unauthenticated.
+// requirePermission -- enforces a permission string. Always 401 on
+// unauthenticated requests; Admin / is_superuser bypass.
 const requirePermission = (permissionName) => {
   return (req, res, next) => {
     if (!req.user) {
-      if (String(process.env.REQUIRE_AUTH).toLowerCase() === 'true') {
-        return res.status(401).json({ detail: 'Authentication required' });
-      }
-      req.user = { id: null, role: 'system', permissions: [], is_superuser: true };
-      return next();
+      return res.status(401).json({ detail: 'Authentication required' });
     }
 
     if (req.user.is_superuser) return next();
@@ -92,10 +85,7 @@ const requirePermission = (permissionName) => {
 function requireModuleAccess(module, level = 'view') {
   return (req, res, next) => {
     if (!req.user) {
-      if (String(process.env.REQUIRE_AUTH).toLowerCase() === 'true') {
-        return res.status(401).json({ detail: 'Authentication required' });
-      }
-      return next();
+      return res.status(401).json({ detail: 'Authentication required' });
     }
     if (req.user.is_superuser) return next();
     const roleName = req.user.role || '';

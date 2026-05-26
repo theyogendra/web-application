@@ -1,12 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../config/supabase');
-const { optionalAuth, requirePermission } = require('../middleware/auth.middleware');
+const { authenticate, requirePermission } = require('../middleware/auth.middleware');
 const { createAuditLog } = require('../services/audit.service');
 const { generateInvoicePdf } = require('../services/pdf.service');
 const { sendInvoiceEmail, sendPaymentReceiptEmail, isConfigured } = require('../services/email.service');
 
-router.use(optionalAuth);
+router.use(authenticate);
 
 // GET /email/logs  -- delivery history
 router.get('/logs', async (req, res, next) => {

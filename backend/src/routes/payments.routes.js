@@ -1,13 +1,13 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../config/supabase');
-const { optionalAuth, requirePermission } = require('../middleware/auth.middleware');
+const { authenticate, requirePermission } = require('../middleware/auth.middleware');
 const { createAuditLog } = require('../services/audit.service');
 const { sendPaymentReceiptEmail, sendInvoicePaidEmail } = require('../services/email.service');
 const { toCsv } = require('../utils/csv');
 const { sanitizeSearch } = require('../utils/escape');
 
-router.use(optionalAuth);
+router.use(authenticate);
 
 const PAYMENT_METHODS = ['cash', 'bank_transfer', 'card', 'upi', 'cheque', 'online'];
 

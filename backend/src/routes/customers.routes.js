@@ -1,11 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../config/supabase');
-const { optionalAuth } = require('../middleware/auth.middleware');
+const { authenticate } = require('../middleware/auth.middleware');
 const { createAuditLog } = require('../services/audit.service');
 const { sanitizeSearch } = require('../utils/escape');
 
-router.use(optionalAuth);
+router.use(authenticate);
 
 // GET /customers  -- list (optionally searchable, used for invoice autofill)
 router.get('/', async (req, res, next) => {

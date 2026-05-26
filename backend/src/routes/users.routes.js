@@ -2,11 +2,11 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const supabase = require('../config/supabase');
-const { optionalAuth, requirePermission } = require('../middleware/auth.middleware');
+const { authenticate, requirePermission } = require('../middleware/auth.middleware');
 const { createAuditLog } = require('../services/audit.service');
 const { sanitizeSearch } = require('../utils/escape');
 
-router.use(optionalAuth);
+router.use(authenticate);
 
 // Public-safe projection (never returns password / password_hash).
 const SAFE_SELECT =

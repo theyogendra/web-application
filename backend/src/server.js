@@ -114,22 +114,26 @@ process.on('uncaughtException', (err) => {
 const PORT = process.env.PORT || 8000;
 
 if (require.main === module) {
-  const scheme = ENABLE_HTTPS ? 'https' : 'http';
-  let server;
-  if (ENABLE_HTTPS) {
-    const { cert, key } = loadOrGenerateCert();
-    server = https.createServer({ cert, key }, app);
-  } else {
-    server = http.createServer(app);
-  }
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log('=========================================');
-    console.log(`Node backend running on ${scheme.toUpperCase()} port ${PORT}`);
-    console.log(`Health check: ${scheme}://localhost:${PORT}/health`);
+  (async () => {
+    const scheme = ENABLE_HTTPS ? 'https' : 'http';
+    let server;
     if (ENABLE_HTTPS) {
-      console.log('Self-signed cert — browser will warn once, accept and reload.');
+      const { cert, key } = await loadOrGenerateCert();
+      server = https.createServer({ cert, key }, app);
+    } else {
+      server = http.createServer(app);
     }
-    console.log('=========================================');
+    server.listen(PORT, '0.0.0.0', () => {
+      console.log('=========================================');
+      console.log(`Node backend running on ${scheme.toUpperCase()} port ${PORT}`);
+      console.log(`Health check: ${scheme}://localhost:${PORT}/health`);
+      if (ENABLE_HTTPS) {
+        console.log('Self-signed cert — browser will warn once, accept and reload.');
+      }
+      console.log('=========================================');
+    });
+  })().catch(err => {
+    console.error('Failed to start server:', err);
   });
 }
 

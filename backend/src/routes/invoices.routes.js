@@ -3,14 +3,14 @@ const router = express.Router();
 const supabase = require('../config/supabase');
 const { validateInvoicePayload } = require('../services/invoice-validation.service');
 const { createAuditLog } = require('../services/audit.service');
-const { requirePermission, authenticate, optionalAuth } = require('../middleware/auth.middleware');
+const { requirePermission, authenticate } = require('../middleware/auth.middleware');
 const { generateInvoiceNumber } = require('../services/numbering.service');
 const { generateInvoicePdf } = require('../services/pdf.service');
 const { sendInvoiceEmail, sendOverdueReminderEmail } = require('../services/email.service');
 const { isOverdue } = require('../services/reports.service');
 const { sanitizeSearch } = require('../utils/escape');
 
-router.use(optionalAuth);
+router.use(authenticate);
 
 // GET all invoices (supports status / customer / search / date-range filters)
 router.get('/', async (req, res, next) => {

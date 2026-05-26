@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../config/supabase');
-const { optionalAuth, requirePermission } = require('../middleware/auth.middleware');
+const { authenticate, requirePermission } = require('../middleware/auth.middleware');
 const { createAuditLog } = require('../services/audit.service');
 const { generateProposalNumber, generateQuotationNumber } = require('../services/numbering.service');
 const { generateProposalPdf } = require('../services/pdf.service');
@@ -9,7 +9,7 @@ const { sendProposalEmail } = require('../services/email.service');
 const { calculateTotals } = require('../services/totals.service');
 const { sanitizeSearch } = require('../utils/escape');
 
-router.use(optionalAuth);
+router.use(authenticate);
 
 const SELECT_LIST = '*';
 const SELECT_FULL = '*, proposal_items(*), quotations!converted_to_quotation_id(id, quotation_number, status, invoices!converted_to_invoice_id(id, invoice_number, status))';

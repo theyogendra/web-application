@@ -1,10 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const supabase = require('../config/supabase');
-const { optionalAuth } = require('../middleware/auth.middleware');
+const { authenticate } = require('../middleware/auth.middleware');
 const { createAuditLog } = require('../services/audit.service');
 
-router.use(optionalAuth);
+router.use(authenticate);
 
 const FIELDS = [
   'company_name', 'email', 'phone', 'address', 'logo_url',

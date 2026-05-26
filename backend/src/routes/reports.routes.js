@@ -1,12 +1,12 @@
 const express = require('express');
 const router = express.Router();
-const { optionalAuth } = require('../middleware/auth.middleware');
+const { authenticate } = require('../middleware/auth.middleware');
 const { createAuditLog } = require('../services/audit.service');
 const { toCsv } = require('../utils/csv');
 const { generateTablePdf } = require('../services/pdf.service');
 const reports = require('../services/reports.service');
 
-router.use(optionalAuth);
+router.use(authenticate);
 
 function parseFilters(q) {
   return {

@@ -15,9 +15,9 @@ const CERT_DIR  = path.join(__dirname, '..', '..', 'certs');
 const CERT_FILE = path.join(CERT_DIR, 'localhost.crt');
 const KEY_FILE  = path.join(CERT_DIR, 'localhost.key');
 
-function generate() {
+async function generate() {
   const attrs = [{ name: 'commonName', value: 'localhost' }];
-  const pems = selfsigned.generate(attrs, {
+  const pems = await selfsigned.generate(attrs, {
     keySize: 2048,
     days: 825,                        // browsers reject certs valid longer than ~825 days
     algorithm: 'sha256',
@@ -38,14 +38,14 @@ function generate() {
   return { cert: pems.cert, key: pems.private };
 }
 
-function loadOrGenerateCert() {
+async function loadOrGenerateCert() {
   if (fs.existsSync(CERT_FILE) && fs.existsSync(KEY_FILE)) {
     return {
       cert: fs.readFileSync(CERT_FILE),
       key:  fs.readFileSync(KEY_FILE)
     };
   }
-  return generate();
+  return await generate();
 }
 
 module.exports = { loadOrGenerateCert, CERT_DIR, CERT_FILE, KEY_FILE };
