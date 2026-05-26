@@ -3,22 +3,40 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
+const http = require('http');
+const https = require('https');
 const env = require('./config/env');
 const { errorHandler } = require('./middleware/error.middleware');
 const { csrfMiddleware } = require('./middleware/csrf.middleware');
+const { loadOrGenerateCert } = require('./config/tls');
 
 const app = express();
 
-// Middleware
-app.use(helmet());
+// HTTPS is on by default; set ENABLE_HTTPS=false to fall back to plain HTTP
+// (only useful in extremely constrained envs — and unsafe outside localhost).
+const ENABLE_HTTPS =
+  String(process.env.ENABLE_HTTPS || 'true').toLowerCase() !== 'false';
+// Whether issued cookies should carry the Secure flag. Tied to actual
+// transport, not just NODE_ENV.
+app.locals.secureCookies = ENABLE_HTTPS || env.NODE_ENV === 'production';
 
-// CORS: always allow localhost dev ports; in non-dev also allow APP_URL.
-// CORS_ORIGINS (comma-separated) adds additional origins on top.
+// Tell express that helmet's hsts is safe to apply (we are or will be on TLS).
+app.use(helmet({
+  hsts: ENABLE_HTTPS
+    ? { maxAge: 15552000, includeSubDomains: true }
+    : false   // don't send HSTS over plain HTTP, browsers reject it anyway
+}));
+
+// CORS: allow localhost dev ports (http AND https) + APP_URL + CORS_ORIGINS.
 const corsOrigins = new Set([
   'http://localhost:3000',
   'http://localhost:3001',
   'http://127.0.0.1:3000',
-  'http://127.0.0.1:3001'
+  'http://127.0.0.1:3001',
+  'https://localhost:3000',
+  'https://localhost:3001',
+  'https://127.0.0.1:3000',
+  'https://127.0.0.1:3001'
 ]);
 if (env.APP_URL) corsOrigins.add(env.APP_URL);
 if (process.env.CORS_ORIGINS) {
@@ -86,25 +104,32 @@ app.get('/', (req, res) => {
 // Error handling
 app.use(errorHandler);
 
-// Ensure the process doesn't exit on unhandled rejections or exceptions
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
-
 process.on('uncaughtException', (err) => {
   console.error('Uncaught Exception:', err);
 });
 
 const PORT = process.env.PORT || 8000;
 
-// Skip the listen call when this file is required by a test (so super-test
-// can drive the app without a real port binding).
 if (require.main === module) {
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`=========================================`);
-    console.log(`Node backend running on port ${PORT}`);
-    console.log(`Health Check: http://localhost:${PORT}/health`);
-    console.log(`=========================================`);
+  const scheme = ENABLE_HTTPS ? 'https' : 'http';
+  let server;
+  if (ENABLE_HTTPS) {
+    const { cert, key } = loadOrGenerateCert();
+    server = https.createServer({ cert, key }, app);
+  } else {
+    server = http.createServer(app);
+  }
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log('=========================================');
+    console.log(`Node backend running on ${scheme.toUpperCase()} port ${PORT}`);
+    console.log(`Health check: ${scheme}://localhost:${PORT}/health`);
+    if (ENABLE_HTTPS) {
+      console.log('Self-signed cert — browser will warn once, accept and reload.');
+    }
+    console.log('=========================================');
   });
 }
 

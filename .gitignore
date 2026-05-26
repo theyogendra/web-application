@@ -12,6 +12,13 @@ out/
 !**/.env.example
 !**/.env.sample
 
+# TLS — never commit a private key. Self-signed certs are auto-generated
+# on first backend start under backend/certs/.
+**/certs/
+*.pem
+*.crt
+*.key
+
 # Backups and temporary files
 _backup_root_duplicates/
 *.db

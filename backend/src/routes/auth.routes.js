@@ -5,32 +5,51 @@ const supabase = require('../config/supabase');
 const env = require('../config/env');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
+const rateLimit = require('express-rate-limit');
 const { authenticate } = require('../middleware/auth.middleware');
 const { createAuditLog } = require('../services/audit.service');
 
-// Cookie helper: cross-site fetch with credentials needs SameSite=None;
-// Secure (and HTTPS in prod). In local dev (NODE_ENV !== 'production') we
-// drop Secure so cookies still set over http://localhost.
-const isProd = env.NODE_ENV === 'production';
-const COOKIE_BASE = {
-  path: '/',
-  sameSite: isProd ? 'none' : 'lax',
-  secure: isProd
-};
+// Cookie security is decided per-request from app.locals.secureCookies, which
+// server.js sets based on the actual HTTPS state (ENABLE_HTTPS=true OR
+// NODE_ENV=production). That way the Secure flag is always honest: cookies
+// won't be issued without TLS, and won't be silently rejected by the browser.
 const TOKEN_TTL_MS = 8 * 24 * 60 * 60 * 1000;  // 8 days, matches JWT expiry
 
-function setAuthCookies(res, token) {
-  // HttpOnly token cookie — JS can't read it, mitigates XSS theft.
-  res.cookie('token', token, { ...COOKIE_BASE, httpOnly: true, maxAge: TOKEN_TTL_MS });
-  // Non-HttpOnly CSRF cookie — frontend reads + echoes in X-CSRF-Token.
-  const csrf = crypto.randomBytes(24).toString('hex');
-  res.cookie('csrf', csrf, { ...COOKIE_BASE, httpOnly: false, maxAge: TOKEN_TTL_MS });
+function cookieBase(req) {
+  const secure = !!(req.app && req.app.locals && req.app.locals.secureCookies);
+  return {
+    path: '/',
+    sameSite: secure ? 'none' : 'lax',
+    secure
+  };
 }
 
-function clearAuthCookies(res) {
-  res.clearCookie('token', { ...COOKIE_BASE, httpOnly: true });
-  res.clearCookie('csrf', { ...COOKIE_BASE, httpOnly: false });
+function setAuthCookies(req, res, token) {
+  const base = cookieBase(req);
+  // HttpOnly token cookie — JS can't read it, mitigates XSS theft.
+  res.cookie('token', token, { ...base, httpOnly: true, maxAge: TOKEN_TTL_MS });
+  // Non-HttpOnly CSRF cookie — frontend reads + echoes in X-CSRF-Token.
+  const csrf = crypto.randomBytes(24).toString('hex');
+  res.cookie('csrf', csrf, { ...base, httpOnly: false, maxAge: TOKEN_TTL_MS });
 }
+
+function clearAuthCookies(req, res) {
+  const base = cookieBase(req);
+  res.clearCookie('token', { ...base, httpOnly: true });
+  res.clearCookie('csrf', { ...base, httpOnly: false });
+}
+
+// Login rate-limit: 10 attempts per 15 minutes per IP. Blunts credential
+// stuffing / brute-force attacks without making real users feel anything.
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    detail: 'Too many login attempts. Please wait a few minutes and try again.'
+  }
+});
 
 // Login historically accepted multipart form-data (legacy OAuth2 password
 // flow). multer().none() keeps that working for the new login page too.
@@ -71,7 +90,7 @@ function publicUser(user, role, moduleAccess) {
   };
 }
 
-router.post('/login', upload.none(), async (req, res, next) => {
+router.post('/login', loginLimiter, upload.none(), async (req, res, next) => {
   try {
     // Accept either "username" (legacy) or "email" as the identifier.
     const username = req.body.username || req.body.email;
@@ -152,7 +171,7 @@ router.post('/login', upload.none(), async (req, res, next) => {
     // Set HttpOnly token + CSRF cookies for the cookie-auth path. The
     // access_token is also returned in the body so the legacy Bearer-header
     // path keeps working.
-    setAuthCookies(res, access_token);
+    setAuthCookies(req, res, access_token);
 
     res.json({
       access_token,
@@ -201,7 +220,7 @@ router.post('/logout', async (req, res) => {
   } catch (err) {
     console.error('Logout audit log failed:', err.message);
   }
-  clearAuthCookies(res);
+  clearAuthCookies(req, res);
   res.json({ message: 'Logged out successfully' });
 });
 

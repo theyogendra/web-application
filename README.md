@@ -170,6 +170,29 @@ supabase/
 
 ---
 
+## HTTPS in development
+
+Both the backend and frontend run on HTTPS by default.
+
+- **Backend** auto-generates a self-signed certificate at `backend/certs/localhost.{crt,key}` on first start. Set `ENABLE_HTTPS=false` to fall back to plain HTTP (rarely useful).
+- **Frontend** dev script uses `next dev --experimental-https`, which auto-generates its own self-signed cert.
+
+The first time you visit `https://localhost:8000/health` and `https://localhost:3000`, the browser shows a "Your connection is not private" warning. Click **Advanced → Proceed to localhost** once per origin — after that the cert sticks.
+
+Want trusted-without-warning certs locally? Install [mkcert](https://github.com/FiloSottile/mkcert):
+```
+mkcert -install
+cd backend && mkcert localhost 127.0.0.1
+mv localhost+1.pem certs/localhost.crt
+mv localhost+1-key.pem certs/localhost.key
+```
+The TLS loader picks those up over the self-signed pair.
+
+Side effects of HTTPS being on:
+- Auth cookies (`token`, `csrf`) carry the **Secure** flag, so they can't leak over plain HTTP.
+- `Strict-Transport-Security` is sent (via helmet).
+- Login is rate-limited to **10 attempts per 15 minutes per IP** to blunt credential-stuffing.
+
 ## Security notes
 
 - **Never commit `.env`** — `.gitignore` covers `**/.env*` with an `!**/.env.example` allow-rule.

@@ -11,5 +11,5 @@ module.exports = {
   RESEND_API_KEY: process.env.RESEND_API_KEY || '',
   FROM_EMAIL: process.env.FROM_EMAIL || 'Enterprise <onboarding@resend.dev>',
   REPLY_TO_EMAIL: process.env.REPLY_TO_EMAIL || '',
-  APP_URL: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'
+  APP_URL: process.env.NEXT_PUBLIC_APP_URL || 'https://localhost:3000'
 };
