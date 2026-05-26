@@ -34,7 +34,7 @@ router.get('/', async (req, res, next) => {
     if (customer) q = q.ilike('customer_name', `%${customer}%`);
     if (from) q = q.gte('proposal_date', from);
     if (to) q = q.lte('proposal_date', to);
-    if (search) q = q.or(`proposal_number.ilike.%${search}%,customer_name.ilike.%${search}%`);
+    if (search) q = q.or(`proposal_number.ilike.*${search}*,customer_name.ilike.*${search}*`);
 
     const { data, error } = await q;
     if (error) throw error;

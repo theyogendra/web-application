@@ -43,7 +43,7 @@ router.get('/', async (req, res, next) => {
     if (created_by) q = q.eq('created_by', created_by);
     if (from) q = q.gte('payment_date', from);
     if (to) q = q.lte('payment_date', to);
-    if (search) q = q.or(`payment_number.ilike.%${search}%,reference_number.ilike.%${search}%`);
+    if (search) q = q.or(`payment_number.ilike.*${search}*,reference_number.ilike.*${search}*`);
 
     const { data, error } = await q;
     if (error) throw error;

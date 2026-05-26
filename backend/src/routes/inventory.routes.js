@@ -19,7 +19,7 @@ router.get('/', async (req, res, next) => {
     const search = sanitizeSearch(req.query.search);
 
     let q = supabase.from('products').select('*').order('created_at', { ascending: false });
-    if (search) q = q.or(`name.ilike.%${search}%,sku.ilike.%${search}%`);
+    if (search) q = q.or(`name.ilike.*${search}*,sku.ilike.*${search}*`);
     if (category) q = q.eq('category', category);
     if (is_active !== undefined) q = q.eq('is_active', is_active === 'true');
 

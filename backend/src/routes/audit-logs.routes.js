@@ -19,7 +19,7 @@ function applyFilters(q, query) {
   if (user_id) q = q.eq('user_id', user_id);
   if (from) q = q.gte('created_at', from);
   if (to) q = q.lte('created_at', to + 'T23:59:59.999Z');
-  if (search) q = q.or(`action.ilike.%${search}%,user_name.ilike.%${search}%`);
+  if (search) q = q.or(`action.ilike.*${search}*,user_name.ilike.*${search}*`);
   return q;
 }
 
