@@ -16,6 +16,32 @@ import {
   Select,
   TextInput,
 } from "@/components/ui";
+import ExportButton from "@/components/ExportButton";
+import { ExportColumn } from "@/lib/ExportService";
+
+const PAYMENT_COLUMNS: ExportColumn[] = [
+  { label: "Payment Number", key: "payment_number" },
+  {
+    label: "Invoice Number",
+    key: "invoice_number",
+    value: (row: any) => row.invoices?.invoice_number || "",
+  },
+  {
+    label: "Customer Name",
+    key: "customer_name",
+    value: (row: any) => row.invoices?.customer_name || "",
+  },
+  { label: "Amount", key: "amount" },
+  {
+    label: "Method",
+    key: "payment_method",
+    value: (row: any) => titleCase(row.payment_method),
+  },
+  { label: "Date", key: "payment_date" },
+  { label: "Reference Number", key: "reference_number" },
+  { label: "Approval Status", key: "approval_status" },
+  { label: "Notes", key: "notes" },
+];
 
 const PAYMENT_METHODS = [
   { value: "", label: "All methods" },
@@ -118,43 +144,22 @@ export default function PaymentsPage() {
     setTimeout(load, 0);
   }
 
-  async function handleExport() {
-    setExportError(null);
-    setExporting(true);
-    try {
-      const qs = buildParams().toString();
-      await downloadFile(
-        "/payments/export" + (qs ? "?" + qs : ""),
-        "payments.csv"
-      );
-    } catch (err: any) {
-      setExportError(err?.message || "Failed to export payments.");
-    } finally {
-      setExporting(false);
-    }
-  }
-
   return (
     <div>
       <PageHeader
         title="Payments"
         description="All recorded payments across invoices."
         actions={
-          <Button
-            variant="secondary"
-            onClick={handleExport}
-            disabled={exporting}
-          >
-            {exporting ? "Exporting..." : "Export CSV"}
-          </Button>
+          <ExportButton
+            title="Payments Report"
+            filename={`Payments_Report_${new Date().toISOString().slice(0, 10)}`}
+            columns={PAYMENT_COLUMNS}
+            data={payments}
+            pdfUrl={`/payments/export${buildParams().toString() ? "?" + buildParams().toString() : ""}`}
+            requiredPermission="payment.export"
+          />
         }
       />
-
-      {exportError ? (
-        <div className="mb-4">
-          <ErrorState message={exportError} />
-        </div>
-      ) : null}
 
       <Card className="mb-5 p-4">
         <form
@@ -162,10 +167,7 @@ export default function PaymentsPage() {
           className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5"
         >
           <Field label="Method">
-            <Select
-              value={method}
-              onChange={(e) => setMethod(e.target.value)}
-            >
+            <Select value={method} onChange={(e) => setMethod(e.target.value)}>
               {PAYMENT_METHODS.map((m) => (
                 <option key={m.value} value={m.value}>
                   {m.label}

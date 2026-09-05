@@ -50,7 +50,7 @@ function emptyItem(): DocumentFormItem {
 // Build initial values from an existing document record (or empty if none).
 export function buildInitialDocumentValues(
   kind: DocumentKind,
-  doc?: any
+  doc?: any,
 ): DocumentFormValues {
   if (!doc) {
     return {
@@ -67,11 +67,10 @@ export function buildInitialDocumentValues(
     };
   }
   const itemsArr =
-    (kind === "quotation"
-      ? doc.quotation_items
-      : doc.proposal_items) || doc.items || [];
-  const docDate =
-    kind === "quotation" ? doc.quotation_date : doc.proposal_date;
+    (kind === "quotation" ? doc.quotation_items : doc.proposal_items) ||
+    doc.items ||
+    [];
+  const docDate = kind === "quotation" ? doc.quotation_date : doc.proposal_date;
   return {
     customer_name: doc.customer_name || "",
     customer_email: doc.customer_email || "",
@@ -117,8 +116,7 @@ export default function DocumentForm({
 
   const totals = useMemo(() => computeTotals(values.items), [values.items]);
 
-  const dateLabel =
-    kind === "quotation" ? "Quotation date" : "Proposal date";
+  const dateLabel = kind === "quotation" ? "Quotation date" : "Proposal date";
 
   function setField(field: keyof DocumentFormValues, value: any) {
     setValues((v) => ({ ...v, [field]: value }));
@@ -127,7 +125,7 @@ export default function DocumentForm({
   function updateItem(
     index: number,
     field: keyof DocumentFormItem,
-    value: any
+    value: any,
   ) {
     setValues((v) => {
       const items = v.items.slice();
@@ -158,7 +156,7 @@ export default function DocumentForm({
       return;
     }
     const validItems = values.items.filter(
-      (it) => (it.description || "").trim() !== ""
+      (it) => (it.description || "").trim() !== "",
     );
     if (validItems.length === 0) {
       setError("Add at least one line item with a description.");

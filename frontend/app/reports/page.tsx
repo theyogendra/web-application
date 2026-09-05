@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Area,
@@ -24,14 +24,39 @@ import {
   AlertTriangle,
   Download,
   FileSpreadsheet,
+  FileText,
   Package,
   PackageX,
   Boxes,
+  CheckCircle,
+  Loader2,
+  ChevronDown,
 } from "lucide-react";
-import { apiGet, downloadFile } from "@/lib/api";
+import { apiGet, downloadCsv, downloadPdf } from "@/lib/api";
 import { formatCurrency, titleCase } from "@/lib/format";
-import { Button, Card, EmptyState, ErrorState, Loading, PageHeader } from "@/components/ui";
+import {
+  Button,
+  Card,
+  EmptyState,
+  ErrorState,
+  Loading,
+  PageHeader,
+} from "@/components/ui";
 import StatCard from "@/components/StatCard";
+import ExportButton from "@/components/ExportButton";
+import { ExportService, ExportColumn } from "@/lib/ExportService";
+
+// ── Export dropdown menu ──────────────────────────────────────────────────────
+const REPORT_TYPES = [
+  { value: "invoices", label: "Invoices" },
+  { value: "payments", label: "Payments" },
+  { value: "customers", label: "Customers" },
+  { value: "tax", label: "Tax Summary" },
+  { value: "revenue", label: "Revenue" },
+  { value: "summary", label: "Summary KPIs" },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 const STATUS_COLORS: Record<string, string> = {
   draft: "#86868B",
@@ -80,44 +105,144 @@ export default function ReportsPage() {
   const [tax, setTax] = useState<any>(null);
   const [inventory, setInventory] = useState<any>(null);
 
+  const [reportType, setReportType] = useState("invoices");
+
+  const reportColumnsMap: Record<string, ExportColumn[]> = {
+    summary: [
+      { label: "Metric", key: "metric" },
+      { label: "Value", key: "value" },
+    ],
+    revenue: [
+      { label: "Month", key: "month" },
+      { label: "Revenue", key: "revenue" },
+    ],
+    invoices: [
+      { label: "Invoice No", key: "invoice_number" },
+      { label: "Customer", key: "customer_name" },
+      { label: "Date", key: "invoice_date" },
+      { label: "Due Date", key: "due_date" },
+      { label: "Status", key: "status" },
+      { label: "Grand Total", key: "grand_total" },
+      { label: "Paid", key: "paid_amount" },
+      { label: "Balance", key: "balance_due" },
+    ],
+    payments: [
+      { label: "Payment Number", key: "payment_number" },
+      {
+        label: "Invoice Number",
+        key: "invoice_number",
+        value: (x: any) => x.invoices?.invoice_number || "",
+      },
+      {
+        label: "Customer",
+        key: "customer_name",
+        value: (x: any) => x.invoices?.customer_name || "",
+      },
+      { label: "Amount", key: "amount" },
+      { label: "Method", key: "payment_method" },
+      { label: "Date", key: "payment_date" },
+    ],
+    customers: [
+      { label: "Customer", key: "customer" },
+      { label: "Invoices", key: "invoice_count" },
+      { label: "Invoiced", key: "invoiced" },
+      { label: "Paid", key: "paid" },
+      { label: "Balance", key: "balance" },
+    ],
+    tax: [
+      { label: "Month", key: "month" },
+      { label: "Subtotal", key: "subtotal" },
+      { label: "Discount", key: "discount" },
+      { label: "Tax", key: "tax" },
+      { label: "Total", key: "total" },
+    ],
+  };
+
+  const getReportData = (type: string) => {
+    switch (type) {
+      case "summary":
+        return summary
+          ? [
+              { metric: "Total Revenue", value: summary.total_revenue },
+              { metric: "Total Invoiced", value: summary.total_invoiced },
+              { metric: "Total Outstanding", value: summary.total_outstanding },
+              { metric: "Total Tax", value: summary.total_tax },
+              { metric: "Invoices", value: summary.invoice_counts?.total || 0 },
+              {
+                metric: "Paid Invoices",
+                value: summary.invoice_counts?.paid || 0,
+              },
+              {
+                metric: "Pending Invoices",
+                value: summary.invoice_counts?.pending || 0,
+              },
+              {
+                metric: "Overdue Invoices",
+                value: summary.invoice_counts?.overdue || 0,
+              },
+              {
+                metric: "Partial Payments",
+                value: summary.invoice_counts?.partially_paid || 0,
+              },
+            ]
+          : [];
+      case "revenue":
+        return revenue?.monthly || [];
+      case "invoices":
+        return invoices?.invoices || [];
+      case "payments":
+        return paymentsRep?.payments || [];
+      case "customers":
+        return customers || [];
+      case "tax":
+        return tax?.by_month || [];
+      default:
+        return [];
+    }
+  };
+
   async function load() {
     setLoading(true);
     setError(null);
     try {
-      const results = await Promise.allSettled([
-        apiGet("/reports/summary"),
+      // Primary summary fetch — renders PageHeader and top KPI strip as soon as available
+      const summaryRes = await apiGet("/reports/summary").catch(() => null);
+      if (summaryRes?.data) {
+        setSummary(summaryRes.data);
+      }
+      setLoading(false);
+
+      // Secondary reports load independently without blocking the page
+      Promise.allSettled([
         apiGet("/reports/revenue"),
         apiGet("/reports/invoices"),
         apiGet("/reports/payments"),
         apiGet("/reports/customers"),
         apiGet("/reports/tax"),
         apiGet("/reports/inventory"),
-      ]);
-      const get = (i: number) =>
-        results[i].status === "fulfilled"
-          ? (results[i] as PromiseFulfilledResult<any>).value
-          : null;
-      const allFailed = results.every((r) => r.status === "rejected");
-      if (allFailed) {
-        const first = results[0] as PromiseRejectedResult;
-        throw new Error(first.reason?.message || "Failed to load reports.");
-      }
-      setSummary(get(0)?.data || null);
-      setRevenue(get(1)?.data || null);
-      setInvoices(get(2)?.data || null);
-      setPaymentsRep(get(3)?.data || null);
-      const cust = get(4)?.data;
-      setCustomers(Array.isArray(cust) ? cust : []);
-      setTax(get(5)?.data || null);
-      setInventory(get(6)?.data || null);
+      ]).then((results) => {
+        const getVal = (idx: number) =>
+          results[idx].status === "fulfilled"
+            ? (results[idx] as PromiseFulfilledResult<any>).value?.data
+            : null;
+
+        if (getVal(0)) setRevenue(getVal(0));
+        if (getVal(1)) setInvoices(getVal(1));
+        if (getVal(2)) setPaymentsRep(getVal(2));
+        const cust = getVal(3);
+        if (cust) setCustomers(Array.isArray(cust) ? cust : []);
+        if (getVal(4)) setTax(getVal(4));
+        if (getVal(5)) setInventory(getVal(5));
+      });
     } catch (err: any) {
       setError(err?.message || "Failed to load reports.");
-    } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   // Build a 12-point trend for each KPI sparkline. Falls back to the monthly
   // revenue series for the headline cards; secondary cards get a flat trace.
@@ -137,14 +262,52 @@ export default function ReportsPage() {
     return ((last - prev) / Math.abs(prev)) * 100;
   }, [revTrend]);
 
-  async function doExport(type: string, format: "csv" | "pdf") {
+  const [exportSuccess, setExportSuccess] = useState<string | null>(null);
+
+  /** Toast timeouts — cleared on unmount */
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function showToast(msg: string, isError = false) {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    if (isError) {
+      setExportError(msg);
+      setExportSuccess(null);
+    } else {
+      setExportSuccess(msg);
+      setExportError(null);
+    }
+    toastTimerRef.current = setTimeout(() => {
+      setExportError(null);
+      setExportSuccess(null);
+    }, 5000);
+  }
+
+  async function doExport(type: string, format: string) {
     const key = `${type}-${format}`;
     setExporting(key);
     setExportError(null);
+    setExportSuccess(null);
+    const today = new Date().toISOString().slice(0, 10);
+    const label = type.charAt(0).toUpperCase() + type.slice(1);
+    const filename = `${label}_Report_${today}`;
     try {
-      await downloadFile(`/reports/export?type=${type}&format=${format}`, `${type}.${format}`);
+      await ExportService.export(
+        format,
+        {
+          title: `${label} Report`,
+          filename,
+          columns: reportColumnsMap[type] || [],
+          data: getReportData(type),
+          pdfUrl:
+            format === "pdf"
+              ? `/reports/export?type=${type}&format=pdf`
+              : undefined,
+        },
+        () => {},
+      );
+      showToast(`${label} report exported successfully.`);
     } catch (err: any) {
-      setExportError(err?.message || "Export failed.");
+      showToast(err?.message || "Export failed.", true);
     } finally {
       setExporting(null);
     }
@@ -194,18 +357,43 @@ export default function ReportsPage() {
         title="Reports"
         description="Revenue, invoices, payments and tax analytics."
         actions={
-          <Button
-            variant="secondary"
-            onClick={() => doExport("summary", "pdf")}
-            disabled={!!exporting}
-          >
-            <Download size={14} />
-            {exporting === "summary-pdf" ? "Exporting..." : "Export summary"}
-          </Button>
+          <div className="flex items-center gap-3">
+            <select
+              value={reportType}
+              onChange={(e) => setReportType(e.target.value)}
+              className="rounded-lg border border-[var(--separator-soft)] bg-[var(--bg-surface)] px-3 py-2 text-[13px] font-semibold text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500/30 dark:bg-[#1C1C1E] dark:border-gray-800"
+            >
+              {REPORT_TYPES.map((r) => (
+                <option key={r.value} value={r.value}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+            <ExportButton
+              title={`${reportType.charAt(0).toUpperCase() + reportType.slice(1)} Report`}
+              filename={`${reportType.charAt(0).toUpperCase() + reportType.slice(1)}_Report_${new Date().toISOString().slice(0, 10)}`}
+              columns={reportColumnsMap[reportType] || []}
+              data={getReportData(reportType)}
+              pdfUrl={`/reports/export?type=${reportType}&format=pdf`}
+              requiredPermission="reports.export"
+            />
+          </div>
         }
       />
 
-      {exportError ? <ErrorState message={exportError} /> : null}
+      {/* Toast strip */}
+      {exportError ? (
+        <div className="mx-auto mb-2 flex max-w-xl items-center gap-2 rounded-xl bg-[#FF3B30]/10 px-4 py-2.5 text-[13px] font-medium text-[#C20F0F] dark:bg-[#FF453A]/15 dark:text-[#FF453A]">
+          <AlertTriangle size={14} className="shrink-0" />
+          {exportError}
+        </div>
+      ) : null}
+      {exportSuccess ? (
+        <div className="mx-auto mb-2 flex max-w-xl items-center gap-2 rounded-xl bg-[#34C759]/10 px-4 py-2.5 text-[13px] font-medium text-[#248A3D] dark:bg-[#30D158]/15 dark:text-[#30D158]">
+          <CheckCircle size={14} className="shrink-0" />
+          {exportSuccess}
+        </div>
+      ) : null}
 
       {/* Hero KPI strip */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -262,7 +450,11 @@ export default function ReportsPage() {
                 </p>
               </div>
               <div className="flex gap-2">
-                <Button variant="ghost" size="sm" onClick={() => doExport("revenue", "csv")}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => doExport("revenue", "pdf")}
+                >
                   <FileSpreadsheet size={13} />
                   CSV
                 </Button>
@@ -273,14 +465,34 @@ export default function ReportsPage() {
             ) : (
               <div className="h-[260px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={monthlyData} margin={{ top: 5, right: 8, bottom: 0, left: 0 }}>
+                  <AreaChart
+                    data={monthlyData}
+                    margin={{ top: 5, right: 8, bottom: 0, left: 0 }}
+                  >
                     <defs>
-                      <linearGradient id="revenueArea" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#0A84FF" stopOpacity={0.32} />
-                        <stop offset="100%" stopColor="#0A84FF" stopOpacity={0} />
+                      <linearGradient
+                        id="revenueArea"
+                        x1="0"
+                        y1="0"
+                        x2="0"
+                        y2="1"
+                      >
+                        <stop
+                          offset="0%"
+                          stopColor="#0A84FF"
+                          stopOpacity={0.32}
+                        />
+                        <stop
+                          offset="100%"
+                          stopColor="#0A84FF"
+                          stopOpacity={0}
+                        />
                       </linearGradient>
                     </defs>
-                    <CartesianGrid stroke="var(--separator-soft)" vertical={false} />
+                    <CartesianGrid
+                      stroke="var(--separator-soft)"
+                      vertical={false}
+                    />
                     <XAxis
                       dataKey="month"
                       tick={{ fill: "var(--text-tertiary)", fontSize: 11 }}
@@ -291,13 +503,18 @@ export default function ReportsPage() {
                       tick={{ fill: "var(--text-tertiary)", fontSize: 11 }}
                       axisLine={false}
                       tickLine={false}
-                      tickFormatter={(v) => "₹" + (v >= 1000 ? (v / 1000).toFixed(0) + "k" : v)}
+                      tickFormatter={(v) =>
+                        "₹" + (v >= 1000 ? (v / 1000).toFixed(0) + "k" : v)
+                      }
                       width={48}
                     />
                     <Tooltip
                       contentStyle={tooltipStyle()}
                       formatter={(v: any) => formatCurrency(v)}
-                      labelStyle={{ color: "var(--text-secondary)", fontSize: 11 }}
+                      labelStyle={{
+                        color: "var(--text-secondary)",
+                        fontSize: 11,
+                      }}
                     />
                     <Area
                       type="monotone"
@@ -318,7 +535,7 @@ export default function ReportsPage() {
         <motion.div
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.10 }}
+          transition={{ duration: 0.3, delay: 0.1 }}
         >
           <Card className="p-5">
             <div className="mb-4 flex items-center justify-between">
@@ -360,7 +577,10 @@ export default function ReportsPage() {
                       verticalAlign="bottom"
                       iconType="circle"
                       iconSize={8}
-                      wrapperStyle={{ fontSize: 11.5, color: "var(--text-secondary)" }}
+                      wrapperStyle={{
+                        fontSize: 11.5,
+                        color: "var(--text-secondary)",
+                      }}
                     />
                   </PieChart>
                 </ResponsiveContainer>
@@ -388,7 +608,11 @@ export default function ReportsPage() {
                   Total collected by channel
                 </p>
               </div>
-              <Button variant="ghost" size="sm" onClick={() => doExport("payments", "csv")}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => doExport("payments", "pdf")}
+              >
                 <FileSpreadsheet size={13} />
                 CSV
               </Button>
@@ -399,14 +623,18 @@ export default function ReportsPage() {
               (() => {
                 const total = methodData.reduce(
                   (s: number, m: any) => s + (Number(m.amount) || 0),
-                  0
+                  0,
                 );
                 return (
                   <div className="space-y-3">
                     {methodData.map((m: any) => {
-                      const pct = total > 0 ? (Number(m.amount) / total) * 100 : 0;
+                      const pct =
+                        total > 0 ? (Number(m.amount) / total) * 100 : 0;
                       return (
-                        <div key={m.name} className="rounded-lg border border-[var(--separator-soft)] bg-[var(--bg-subtle)] px-3.5 py-3">
+                        <div
+                          key={m.name}
+                          className="rounded-lg border border-[var(--separator-soft)] bg-[var(--bg-subtle)] px-3.5 py-3"
+                        >
                           <div className="flex items-center justify-between gap-3">
                             <div className="flex items-center gap-2.5">
                               <span
@@ -460,7 +688,7 @@ export default function ReportsPage() {
         <motion.div
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.20 }}
+          transition={{ duration: 0.3, delay: 0.2 }}
         >
           <Card className="p-5">
             <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">
@@ -473,19 +701,26 @@ export default function ReportsPage() {
               {(invoices?.aging || []).map((row: any) => {
                 const total = (invoices?.aging || []).reduce(
                   (s: number, r: any) => s + (Number(r.amount) || 0),
-                  0
+                  0,
                 );
-                const pct = total > 0 ? ((Number(row.amount) || 0) / total) * 100 : 0;
+                const pct =
+                  total > 0 ? ((Number(row.amount) || 0) / total) * 100 : 0;
                 const tone =
-                  row.bucket === "90+" ? "bg-[#FF3B30]"
-                  : row.bucket === "61-90" ? "bg-[#FF9500]"
-                  : row.bucket === "31-60" ? "bg-[#FF9F0A]"
-                  : row.bucket === "1-30" ? "bg-[#FFCC00]"
-                  : "bg-[#34C759]";
+                  row.bucket === "90+"
+                    ? "bg-[#FF3B30]"
+                    : row.bucket === "61-90"
+                      ? "bg-[#FF9500]"
+                      : row.bucket === "31-60"
+                        ? "bg-[#FF9F0A]"
+                        : row.bucket === "1-30"
+                          ? "bg-[#FFCC00]"
+                          : "bg-[#34C759]";
                 return (
                   <div key={row.bucket}>
                     <div className="flex items-center justify-between text-[12.5px]">
-                      <span className="text-[var(--text-secondary)]">{row.bucket}</span>
+                      <span className="text-[var(--text-secondary)]">
+                        {row.bucket}
+                      </span>
                       <span className="financial font-medium text-[var(--text-primary)]">
                         {formatCurrency(row.amount)}
                       </span>
@@ -566,7 +801,10 @@ export default function ReportsPage() {
             ) : (
               (() => {
                 const cats = inventory.categories || [];
-                const max = Math.max(...cats.map((c: any) => Number(c.value) || 0), 1);
+                const max = Math.max(
+                  ...cats.map((c: any) => Number(c.value) || 0),
+                  1,
+                );
                 return (
                   <div className="space-y-3">
                     {cats.map((c: any, i: number) => {
@@ -593,8 +831,14 @@ export default function ReportsPage() {
                             <motion.div
                               className="h-full rounded-full"
                               style={{
-                                background:
-                                  ["#0A84FF", "#34C759", "#AF52DE", "#FF9500", "#FF2D55", "#5AC8FA"][i % 6],
+                                background: [
+                                  "#0A84FF",
+                                  "#34C759",
+                                  "#AF52DE",
+                                  "#FF9500",
+                                  "#FF2D55",
+                                  "#5AC8FA",
+                                ][i % 6],
                               }}
                               initial={{ width: 0 }}
                               animate={{ width: `${pct}%` }}
@@ -629,7 +873,8 @@ export default function ReportsPage() {
               </div>
               {inventory?.low_stock_count > 0 ? (
                 <span className="rounded-full bg-[#FF3B30]/12 px-2 py-0.5 text-[11px] font-medium text-[#C20F0F] dark:bg-[#FF453A]/20 dark:text-[#FF453A]">
-                  {inventory.low_stock_count} alert{inventory.low_stock_count > 1 ? "s" : ""}
+                  {inventory.low_stock_count} alert
+                  {inventory.low_stock_count > 1 ? "s" : ""}
                 </span>
               ) : null}
             </div>
@@ -646,16 +891,14 @@ export default function ReportsPage() {
                         border: "border-[#FF3B30]/20",
                         bg: "bg-[#FF3B30]/6",
                         text: "text-[#C20F0F] dark:text-[#FF453A]",
-                        chip:
-                          "bg-[#FF3B30]/15 text-[#C20F0F] dark:bg-[#FF453A]/25 dark:text-[#FF453A]",
+                        chip: "bg-[#FF3B30]/15 text-[#C20F0F] dark:bg-[#FF453A]/25 dark:text-[#FF453A]",
                         chipLabel: "Out of stock",
                       }
                     : {
                         border: "border-[#FF9500]/20",
                         bg: "bg-[#FF9500]/6",
                         text: "text-[#C77800] dark:text-[#FF9F0A]",
-                        chip:
-                          "bg-[#FF9500]/15 text-[#C77800] dark:bg-[#FF9F0A]/25 dark:text-[#FF9F0A]",
+                        chip: "bg-[#FF9500]/15 text-[#C77800] dark:bg-[#FF9F0A]/25 dark:text-[#FF9F0A]",
                         chipLabel: "Low",
                       };
                   return (
@@ -683,7 +926,9 @@ export default function ReportsPage() {
                           {stock} {p.unit || "left"}
                         </p>
                         <p className="text-[11px] text-[var(--text-tertiary)]">
-                          {reorder > 0 ? `Reorder at ${reorder}` : "No threshold set"}
+                          {reorder > 0
+                            ? `Reorder at ${reorder}`
+                            : "No threshold set"}
                         </p>
                       </div>
                     </div>
@@ -712,7 +957,11 @@ export default function ReportsPage() {
                   By total paid
                 </p>
               </div>
-              <Button variant="ghost" size="sm" onClick={() => doExport("customers", "csv")}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => doExport("customers", "pdf")}
+              >
                 <FileSpreadsheet size={13} />
                 CSV
               </Button>
@@ -760,7 +1009,7 @@ export default function ReportsPage() {
         <motion.div
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3, delay: 0.30 }}
+          transition={{ duration: 0.3, delay: 0.3 }}
         >
           <Card className="p-5">
             <div className="mb-3 flex items-center justify-between">
@@ -772,7 +1021,11 @@ export default function ReportsPage() {
                   GST collected to date
                 </p>
               </div>
-              <Button variant="ghost" size="sm" onClick={() => doExport("tax", "csv")}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => doExport("tax", "pdf")}
+              >
                 <FileSpreadsheet size={13} />
                 CSV
               </Button>
@@ -802,15 +1055,26 @@ export default function ReportsPage() {
                 <table className="w-full text-[12.5px]">
                   <thead className="sticky top-0 bg-[var(--bg-subtle)]">
                     <tr className="text-[11px] uppercase tracking-wide text-[var(--text-tertiary)]">
-                      <th className="px-3 py-1.5 text-left font-medium">Month</th>
-                      <th className="px-3 py-1.5 text-right font-medium">Tax</th>
-                      <th className="px-3 py-1.5 text-right font-medium">Total</th>
+                      <th className="px-3 py-1.5 text-left font-medium">
+                        Month
+                      </th>
+                      <th className="px-3 py-1.5 text-right font-medium">
+                        Tax
+                      </th>
+                      <th className="px-3 py-1.5 text-right font-medium">
+                        Total
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
                     {tax.by_month.map((m: any) => (
-                      <tr key={m.month} className="border-t border-[var(--separator-soft)]">
-                        <td className="px-3 py-1.5 text-[var(--text-secondary)]">{m.month}</td>
+                      <tr
+                        key={m.month}
+                        className="border-t border-[var(--separator-soft)]"
+                      >
+                        <td className="px-3 py-1.5 text-[var(--text-secondary)]">
+                          {m.month}
+                        </td>
                         <td className="financial px-3 py-1.5 text-right text-[var(--text-primary)]">
                           {formatCurrency(m.tax)}
                         </td>

@@ -1,5 +1,5 @@
-const jwt = require('jsonwebtoken');
-const env = require('../config/env');
+const jwt = require("jsonwebtoken");
+const env = require("../config/env");
 
 function decodeUserFromToken(token) {
   // jwt.verify throws on bad signature / expired / malformed. We catch it
@@ -11,8 +11,10 @@ function decodeUserFromToken(token) {
       id: payload.sub,
       email: payload.email,
       role: payload.role || null,
-      permissions: Array.isArray(payload.permissions) ? payload.permissions : [],
-      is_superuser: !!payload.is_superuser
+      permissions: Array.isArray(payload.permissions)
+        ? payload.permissions
+        : [],
+      is_superuser: !!payload.is_superuser,
     };
   } catch (err) {
     return null;
@@ -22,11 +24,11 @@ function decodeUserFromToken(token) {
 // Find a JWT in either the Authorization header or an HttpOnly cookie.
 function tokenFromRequest(req) {
   const authHeader = req.headers && req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    return { token: authHeader.split(' ')[1], source: 'bearer' };
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    return { token: authHeader.split(" ")[1], source: "bearer" };
   }
   if (req.cookies && req.cookies.token) {
-    return { token: req.cookies.token, source: 'cookie' };
+    return { token: req.cookies.token, source: "cookie" };
   }
   return { token: null, source: null };
 }
@@ -34,10 +36,12 @@ function tokenFromRequest(req) {
 // authenticate -- hard 401 when the token is missing or invalid.
 const authenticate = async (req, res, next) => {
   const { token } = tokenFromRequest(req);
-  if (!token) return res.status(401).json({ detail: 'Missing or invalid token' });
+  if (!token)
+    return res.status(401).json({ detail: "Missing or invalid token" });
 
   const user = decodeUserFromToken(token);
-  if (!user) return res.status(401).json({ detail: 'Invalid or expired token' });
+  if (!user)
+    return res.status(401).json({ detail: "Invalid or expired token" });
 
   req.user = user;
   next();
@@ -52,7 +56,7 @@ const optionalAuth = (req, res, next) => {
     const user = decodeUserFromToken(token);
     if (user) {
       req.user = user;
-      req.authSource = source;  // 'bearer' or 'cookie' — used by CSRF middleware
+      req.authSource = source; // 'bearer' or 'cookie' — used by CSRF middleware
     }
   }
   next();
@@ -63,18 +67,21 @@ const optionalAuth = (req, res, next) => {
 const requirePermission = (permissionName) => {
   return (req, res, next) => {
     if (!req.user) {
-      return res.status(401).json({ detail: 'Authentication required' });
+      return res.status(401).json({ detail: "Authentication required" });
     }
 
     if (req.user.is_superuser) return next();
     if (!permissionName) return next();
-    if (Array.isArray(req.user.permissions) && req.user.permissions.includes(permissionName)) {
+    if (
+      Array.isArray(req.user.permissions) &&
+      req.user.permissions.includes(permissionName)
+    ) {
       return next();
     }
 
     return res.status(403).json({
-      detail: 'You do not have permission for this action',
-      required: permissionName
+      detail: "You do not have permission for this action",
+      required: permissionName,
     });
   };
 };
@@ -82,29 +89,35 @@ const requirePermission = (permissionName) => {
 // requireModuleAccess(module, level) -- enforces per-user module access
 // (Employee role uses user_module_access). Admin / Manager / is_superuser
 // bypass. Level is 'view' or 'edit'; edit also satisfies view.
-function requireModuleAccess(module, level = 'view') {
+function requireModuleAccess(module, level = "view") {
   return (req, res, next) => {
     if (!req.user) {
-      return res.status(401).json({ detail: 'Authentication required' });
+      return res.status(401).json({ detail: "Authentication required" });
     }
     if (req.user.is_superuser) return next();
-    const roleName = req.user.role || '';
-    if (roleName === 'Admin' || roleName === 'Manager') return next();
+    const roleName = req.user.role || "";
+    if (roleName === "Admin" || roleName === "Manager") return next();
 
     const access = req.user.module_access || {};
-    const granted = access[module];                  // 'edit' | 'view' | undefined
-    const ok = level === 'view'
-      ? granted === 'view' || granted === 'edit'
-      : granted === 'edit';
+    const granted = access[module]; // 'edit' | 'view' | undefined
+    const ok =
+      level === "view"
+        ? granted === "view" || granted === "edit"
+        : granted === "edit";
     if (ok) return next();
 
     return res.status(403).json({
       detail: `You do not have ${level} access to ${module}`,
-      module, required: level
+      module,
+      required: level,
     });
   };
 }
 
 module.exports = {
-  authenticate, optionalAuth, requirePermission, requireModuleAccess, decodeUserFromToken
+  authenticate,
+  optionalAuth,
+  requirePermission,
+  requireModuleAccess,
+  decodeUserFromToken,
 };

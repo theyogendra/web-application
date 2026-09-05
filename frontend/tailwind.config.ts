@@ -19,7 +19,12 @@ const config: Config = {
           "Roboto",
           "sans-serif",
         ],
-        display: ["var(--font-inter)", "-apple-system", "system-ui", "sans-serif"],
+        display: [
+          "var(--font-inter)",
+          "-apple-system",
+          "system-ui",
+          "sans-serif",
+        ],
       },
       colors: {
         // System-blue accent (Apple #0071E3 / Microsoft #0078D4 — blended)
@@ -30,32 +35,32 @@ const config: Config = {
           200: "#BFDBFE",
           300: "#93C5FD",
           400: "#60A5FA",
-          500: "#0A84FF",        // Apple system blue (dark)
-          600: "#0071E3",        // Apple system blue (light)
+          500: "#0A84FF", // Apple system blue (dark)
+          600: "#0071E3", // Apple system blue (light)
           700: "#005BBF",
           800: "#1E40AF",
           900: "#1E3A8A",
         },
         // Neutral grayscale — Apple-style cool tints
         ink: {
-          50:  "#FBFBFD",
-          100: "#F5F5F7",        // page bg light
+          50: "#FBFBFD",
+          100: "#F5F5F7", // page bg light
           150: "#EFEFF1",
-          200: "#E5E5EA",        // separators light
+          200: "#E5E5EA", // separators light
           300: "#D2D2D7",
-          400: "#A1A1A6",        // tertiary text
-          500: "#86868B",        // secondary text
+          400: "#A1A1A6", // tertiary text
+          500: "#86868B", // secondary text
           600: "#6E6E73",
           700: "#3A3A3C",
-          800: "#2C2C2E",        // surface dark
-          850: "#1C1C1E",        // elevated dark
-          900: "#0B0B0F",        // page bg dark
+          800: "#2C2C2E", // surface dark
+          850: "#1C1C1E", // elevated dark
+          900: "#0B0B0F", // page bg dark
           950: "#000000",
         },
         // Semantic — Apple system colors
         success: { 50: "#E8F8EC", 500: "#34C759", 600: "#248A3D" },
         warning: { 50: "#FFF4E6", 500: "#FF9500", 600: "#C77800" },
-        danger:  { 50: "#FFEDEC", 500: "#FF3B30", 600: "#C20F0F" },
+        danger: { 50: "#FFEDEC", 500: "#FF3B30", 600: "#C20F0F" },
       },
       boxShadow: {
         // Subtle by default; layered only when needed (Apple does very little shadow)
@@ -87,11 +92,14 @@ const config: Config = {
           "linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(255,255,255,0.84) 100%)",
       },
       keyframes: {
-        "fade-in":    { "0%": { opacity: "0" }, "100%": { opacity: "1" } },
-        "fade-in-up": { "0%": { opacity: "0", transform: "translateY(8px)" }, "100%": { opacity: "1", transform: "translateY(0)" } },
+        "fade-in": { "0%": { opacity: "0" }, "100%": { opacity: "1" } },
+        "fade-in-up": {
+          "0%": { opacity: "0", transform: "translateY(8px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
       },
       animation: {
-        "fade-in":    "fade-in 200ms ease-out both",
+        "fade-in": "fade-in 200ms ease-out both",
         "fade-in-up": "fade-in-up 300ms cubic-bezier(0.16, 1, 0.3, 1) both",
       },
     },

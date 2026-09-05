@@ -3,12 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import {
-  apiDelete,
-  apiGet,
-  apiPost,
-  downloadFile,
-} from "@/lib/api";
+import { apiDelete, apiGet, apiPost, downloadFile } from "@/lib/api";
 import { formatCurrency, formatDate } from "@/lib/format";
 import { computeLineTotal } from "@/lib/totals";
 import { canEdit as canEditModule } from "@/lib/auth";
@@ -23,6 +18,15 @@ import {
   PageHeader,
   TextInput,
 } from "@/components/ui";
+import ExportButton from "@/components/ExportButton";
+import { ExportColumn } from "@/lib/ExportService";
+
+const SINGLE_PROPOSAL_COLUMNS: ExportColumn[] = [
+  { label: "Description", key: "description" },
+  { label: "Quantity", key: "quantity" },
+  { label: "Unit Price", key: "unit_price" },
+  { label: "Tax Rate (%)", key: "tax_rate" },
+];
 
 export default function ProposalDetailPage() {
   const router = useRouter();
@@ -107,7 +111,7 @@ export default function ProposalDetailPage() {
     try {
       await downloadFile(
         `/proposals/${id}/pdf`,
-        `${proposal?.proposal_number || "proposal"}.pdf`
+        `${proposal?.proposal_number || "proposal"}.pdf`,
       );
     } catch (err: any) {
       flashError(err?.message || "Failed to download PDF.");
@@ -119,8 +123,7 @@ export default function ProposalDetailPage() {
   async function handleMark(action: "accepted" | "rejected") {
     setBusy(action);
     try {
-      const path =
-        action === "accepted" ? "mark-accepted" : "mark-rejected";
+      const path = action === "accepted" ? "mark-accepted" : "mark-rejected";
       const res = await apiPost(`/proposals/${id}/${path}`);
       if (res && res.success === false) {
         throw new Error(res.message || `Failed to mark ${action}.`);
@@ -139,7 +142,7 @@ export default function ProposalDetailPage() {
     const verb = isDraft ? "delete" : "cancel";
     if (
       !window.confirm(
-        `Are you sure you want to ${verb} this proposal? This cannot be undone.`
+        `Are you sure you want to ${verb} this proposal? This cannot be undone.`,
       )
     ) {
       return;
@@ -154,7 +157,7 @@ export default function ProposalDetailPage() {
       // before navigating away so the user understands the chain.
       if (res?.cascaded?.quotation_number) {
         setActionMsg(
-          `Proposal ${verb}ed. Linked quotation ${res.cascaded.quotation_number} was also marked rejected.`
+          `Proposal ${verb}ed. Linked quotation ${res.cascaded.quotation_number} was also marked rejected.`,
         );
         // Brief delay so the message is visible before the redirect.
         setTimeout(() => router.push("/proposals"), 2000);
@@ -224,13 +227,16 @@ export default function ProposalDetailPage() {
                 {busy === "send" ? "Sending..." : "Send"}
               </Button>
             ) : null}
-            <Button
-              variant="secondary"
-              onClick={handlePdf}
-              disabled={busy !== null}
-            >
-              {busy === "pdf" ? "Preparing..." : "Download PDF"}
-            </Button>
+            <ExportButton
+              title="Proposal"
+              filename={proposal?.proposal_number || "proposal"}
+              columns={SINGLE_PROPOSAL_COLUMNS}
+              data={[proposal]}
+              isDocument={true}
+              documentData={proposal}
+              pdfUrl={`/proposals/${id}/pdf`}
+              requiredPermission="proposals.read"
+            />
             {canMark ? (
               <>
                 <Button
@@ -266,8 +272,8 @@ export default function ProposalDetailPage() {
                 {busy === "delete"
                   ? "Working..."
                   : status === "draft"
-                  ? "Delete"
-                  : "Cancel"}
+                    ? "Delete"
+                    : "Cancel"}
               </Button>
             ) : null}
           </>
@@ -338,9 +344,7 @@ export default function ProposalDetailPage() {
             </div>
             <div className="mt-1 inline-flex flex-wrap gap-1.5">
               <StatusBadge status={proposal.status} />
-              {proposal.is_expired ? (
-                <StatusBadge status="expired" />
-              ) : null}
+              {proposal.is_expired ? <StatusBadge status="expired" /> : null}
             </div>
           </div>
           <div className="text-right">
@@ -444,7 +448,7 @@ export default function ProposalDetailPage() {
                       </td>
                       <td className="py-2 pl-2 text-right font-medium text-gray-900">
                         {formatCurrency(
-                          it.line_total != null ? it.line_total : r.lineTotal
+                          it.line_total != null ? it.line_total : r.lineTotal,
                         )}
                       </td>
                     </tr>
@@ -533,7 +537,7 @@ function ConvertToQuotationModal({
     e.preventDefault();
     if (
       !window.confirm(
-        "Convert this proposal to a quotation? The proposal will be marked Converted."
+        "Convert this proposal to a quotation? The proposal will be marked Converted.",
       )
     ) {
       return;
@@ -544,7 +548,7 @@ function ConvertToQuotationModal({
       if (validUntil) body.valid_until = validUntil;
       const res = await apiPost(
         `/proposals/${proposalId}/convert-to-quotation`,
-        body
+        body,
       );
       if (res && res.success === false) {
         throw new Error(res.message || "Failed to convert.");
@@ -553,7 +557,7 @@ function ConvertToQuotationModal({
       const quotationId = quotation?.id;
       if (!quotationId) {
         throw new Error(
-          "Conversion succeeded but no quotation id was returned."
+          "Conversion succeeded but no quotation id was returned.",
         );
       }
       onSuccess(quotationId);

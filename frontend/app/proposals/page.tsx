@@ -18,6 +18,21 @@ import {
   Select,
   TextInput,
 } from "@/components/ui";
+import ExportButton from "@/components/ExportButton";
+import { ExportColumn } from "@/lib/ExportService";
+
+const PROPOSAL_COLUMNS: ExportColumn[] = [
+  { label: "Proposal Number", key: "proposal_number" },
+  { label: "Customer Name", key: "customer_name" },
+  { label: "Customer Email", key: "customer_email" },
+  { label: "Date", key: "proposal_date" },
+  { label: "Valid Until", key: "valid_until" },
+  { label: "Subtotal", key: "subtotal" },
+  { label: "Discount", key: "discount" },
+  { label: "Tax", key: "tax_amount" },
+  { label: "Grand Total", key: "grand_total" },
+  { label: "Status", key: "status" },
+];
 
 const STATUS_OPTIONS = [
   { value: "", label: "All statuses" },
@@ -90,11 +105,19 @@ export default function ProposalsPage() {
         title="Proposals"
         description="Draft and send proposals to your customers."
         actions={
-          mayEdit ? (
-            <Link href="/proposals/create">
-              <Button>+ New Proposal</Button>
-            </Link>
-          ) : null
+          <div className="flex items-center gap-3">
+            <ExportButton
+              title="Proposals Report"
+              filename={`Proposals_Report_${new Date().toISOString().slice(0, 10)}`}
+              columns={PROPOSAL_COLUMNS}
+              data={items}
+            />
+            {mayEdit ? (
+              <Link href="/proposals/create">
+                <Button>+ New Proposal</Button>
+              </Link>
+            ) : null}
+          </div>
         }
       />
 
@@ -104,10 +127,7 @@ export default function ProposalsPage() {
           className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5"
         >
           <Field label="Status">
-            <Select
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-            >
+            <Select value={status} onChange={(e) => setStatus(e.target.value)}>
               {STATUS_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}

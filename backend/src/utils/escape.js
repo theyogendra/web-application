@@ -7,21 +7,21 @@
 // Strip those characters entirely — for an SMB search box, the loss of
 // literal `%` searches is acceptable.
 function sanitizeSearch(s) {
-  if (s === null || s === undefined) return '';
-  return String(s).replace(/[,()*%_\\]/g, '');
+  if (s === null || s === undefined) return "";
+  return String(s).replace(/[,()*%_\\]/g, "");
 }
 
 // Escape user-supplied text before embedding it in HTML (e.g. invoice /
 // receipt email templates). Anything that lands in `${...}` inside a
 // template literal that produces HTML MUST go through this.
 function escapeHtml(s) {
-  if (s === null || s === undefined) return '';
+  if (s === null || s === undefined) return "";
   return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 module.exports = { sanitizeSearch, escapeHtml };

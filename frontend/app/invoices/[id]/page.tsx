@@ -3,12 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import {
-  apiDelete,
-  apiGet,
-  apiPost,
-  downloadFile,
-} from "@/lib/api";
+import { apiDelete, apiGet, apiPost, downloadFile } from "@/lib/api";
 import {
   formatCurrency,
   formatDate,
@@ -30,6 +25,15 @@ import {
   TextArea,
   TextInput,
 } from "@/components/ui";
+import ExportButton from "@/components/ExportButton";
+import { ExportColumn } from "@/lib/ExportService";
+
+const SINGLE_INVOICE_COLUMNS: ExportColumn[] = [
+  { label: "Description", key: "description" },
+  { label: "Quantity", key: "quantity" },
+  { label: "Unit Price", key: "unit_price" },
+  { label: "Tax Rate (%)", key: "tax_rate" },
+];
 
 function ApprovalBadge({ status }: { status?: string }) {
   const key = (status || "").toLowerCase();
@@ -156,7 +160,7 @@ export default function InvoiceDetailPage() {
     try {
       await downloadFile(
         `/invoices/${id}/pdf`,
-        `${invoice?.invoice_number || "invoice"}.pdf`
+        `${invoice?.invoice_number || "invoice"}.pdf`,
       );
     } catch (err: any) {
       flashError(err?.message || "Failed to download PDF.");
@@ -165,8 +169,47 @@ export default function InvoiceDetailPage() {
     }
   }
 
+  async function handleSubmit() {
+    setBusy("submit");
+    try {
+      const res = await apiPost(`/invoices/${id}/submit`);
+      if (res && res.success === false) {
+        throw new Error(res.message || "Failed to submit invoice.");
+      }
+      flash(res?.message || "Invoice submitted for approval.");
+      load();
+    } catch (err: any) {
+      flashError(err?.message || "Failed to submit invoice.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleRequestApproval() {
+    setBusy("request_approval");
+    try {
+      const res = await apiPost(`/invoices/${id}/request-approval`);
+      if (res && res.success === false) {
+        throw new Error(res.message || "Failed to request approval.");
+      }
+      flash(res?.message || "Approval requested.");
+      load();
+    } catch (err: any) {
+      flashError(err?.message || "Failed to request approval.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function handleApprove() {
     setBusy("approve");
+    // Debug: log current status before calling the approve endpoint
+    console.log(
+      "[Invoice Approve] Invoice ID:",
+      id,
+      "| Current status:",
+      invoice?.status,
+    );
     try {
       const res = await apiPost(`/invoices/${id}/approve`, { remarks: "" });
       if (res && res.success === false) {
@@ -175,9 +218,33 @@ export default function InvoiceDetailPage() {
       flash(res?.message || "Invoice approved.");
       load();
     } catch (err: any) {
-      // The legacy approval endpoint 400s with "no approval rule" when none is
-      // configured — surface the message verbatim.
       flashError(err?.message || "Failed to approve invoice.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleReject() {
+    const remarks = window.prompt("Enter rejection reason (optional):") ?? "";
+    setBusy("reject");
+    // Debug: log current status before calling the reject endpoint
+    console.log(
+      "[Invoice Reject] Invoice ID:",
+      id,
+      "| Current status:",
+      invoice?.status,
+      "| Remarks:",
+      remarks,
+    );
+    try {
+      const res = await apiPost(`/invoices/${id}/reject`, { remarks });
+      if (res && res.success === false) {
+        throw new Error(res.message || "Failed to reject invoice.");
+      }
+      flash(res?.message || "Invoice rejected.");
+      load();
+    } catch (err: any) {
+      flashError(err?.message || "Failed to reject invoice.");
     } finally {
       setBusy(null);
     }
@@ -186,7 +253,7 @@ export default function InvoiceDetailPage() {
   async function handleDelete() {
     if (
       !window.confirm(
-        "Are you sure you want to delete / cancel this invoice? This cannot be undone."
+        "Are you sure you want to delete / cancel this invoice? This cannot be undone.",
       )
     ) {
       return;
@@ -199,7 +266,7 @@ export default function InvoiceDetailPage() {
       }
       if (res?.cascaded?.quotation_number) {
         setActionMsg(
-          `Invoice ${res.deleted ? "deleted" : "cancelled"}. Linked quotation ${res.cascaded.quotation_number} was also marked rejected.`
+          `Invoice ${res.deleted ? "deleted" : "cancelled"}. Linked quotation ${res.cascaded.quotation_number} was also marked rejected.`,
         );
         setTimeout(() => router.push("/invoices"), 2000);
       } else {
@@ -247,28 +314,75 @@ export default function InvoiceDetailPage() {
         description="Invoice details, payments and actions."
         actions={
           <>
-            {mayEditInvoices ? (
-              <Link href={`/invoices/${id}/edit`}>
-                <Button variant="secondary">Edit</Button>
-              </Link>
+            {/* ── Enterprise Export Center: always available ── */}
+            <ExportButton
+              title="Invoice"
+              filename={invoice.invoice_number || "invoice"}
+              columns={SINGLE_INVOICE_COLUMNS}
+              data={[invoice]}
+              isDocument={true}
+              documentData={invoice}
+              pdfUrl={`/invoices/${id}/pdf`}
+              requiredPermission="invoice.export"
+            />
+
+            {/* ── DRAFT: Edit + Submit ── */}
+            {mayEditInvoices &&
+            ["draft", "needs_review"].includes(
+              (invoice.status || "").toLowerCase(),
+            ) ? (
+              <>
+                <Link href={`/invoices/${id}/edit`}>
+                  <Button variant="secondary" disabled={busy !== null}>
+                    Edit
+                  </Button>
+                </Link>
+                <Button onClick={handleSubmit} disabled={busy !== null}>
+                  {busy === "submit" ? "Submitting..." : "Submit"}
+                </Button>
+              </>
             ) : null}
-            {mayEditInvoices ? (
-              <Button
-                variant="secondary"
-                onClick={handleSend}
-                disabled={busy !== null}
-              >
-                {busy === "send" ? "Sending..." : "Send"}
+
+            {/* ── SUBMITTED: Request Approval ── */}
+            {mayEditInvoices &&
+            (invoice.status || "").toLowerCase() === "submitted" ? (
+              <Button onClick={handleRequestApproval} disabled={busy !== null}>
+                {busy === "request_approval"
+                  ? "Requesting..."
+                  : "Request Approval"}
               </Button>
             ) : null}
-            <Button
-              variant="secondary"
-              onClick={handlePdf}
-              disabled={busy !== null}
-            >
-              {busy === "pdf" ? "Preparing..." : "Download PDF"}
-            </Button>
-            {mayEditInvoices ? (
+
+            {/* ── PENDING APPROVAL: Approve + Reject ── */}
+            {mayEditInvoices &&
+            (invoice.status || "").toLowerCase() === "pending_approval" ? (
+              <>
+                <Button onClick={handleApprove} disabled={busy !== null}>
+                  {busy === "approve" ? "Approving..." : "Approve"}
+                </Button>
+                <Button
+                  variant="danger"
+                  onClick={handleReject}
+                  disabled={busy !== null}
+                >
+                  {busy === "reject" ? "Rejecting..." : "Reject"}
+                </Button>
+              </>
+            ) : null}
+
+            {/* ── APPROVED: Send to customer ── */}
+            {mayEditInvoices &&
+            (invoice.status || "").toLowerCase() === "approved" ? (
+              <Button onClick={handleSend} disabled={busy !== null}>
+                {busy === "send" ? "Sending..." : "Send Invoice"}
+              </Button>
+            ) : null}
+
+            {/* ── SENT / PARTIALLY PAID: Send Reminder ── */}
+            {mayEditInvoices &&
+            ["sent", "partially_paid"].includes(
+              (invoice.status || "").toLowerCase(),
+            ) ? (
               <Button
                 variant="secondary"
                 onClick={handleReminder}
@@ -277,18 +391,12 @@ export default function InvoiceDetailPage() {
                 {busy === "reminder" ? "Sending..." : "Send Reminder"}
               </Button>
             ) : null}
+
+            {/* ── Delete/Cancel: available until paid ── */}
             {mayEditInvoices &&
-            ["draft", "sent", "submitted"].includes(
+            !["paid", "cancelled"].includes(
               (invoice.status || "").toLowerCase(),
             ) ? (
-              <Button
-                onClick={handleApprove}
-                disabled={busy !== null}
-              >
-                {busy === "approve" ? "Approving..." : "Approve"}
-              </Button>
-            ) : null}
-            {mayEditInvoices ? (
               <Button
                 variant="danger"
                 onClick={handleDelete}
@@ -377,12 +485,17 @@ export default function InvoiceDetailPage() {
               {invoice.customer_phone}
             </div>
             <div className="text-sm text-gray-500">
-              {invoice.billing_address}
+              <strong>Billing:</strong> {invoice.billing_address}
             </div>
+            {invoice.shipping_address && (
+              <div className="text-sm text-gray-500">
+                <strong>Shipping:</strong> {invoice.shipping_address}
+              </div>
+            )}
           </div>
           <div className="sm:text-right">
             <div className="text-xs uppercase tracking-wide text-gray-400">
-              Dates
+              Details
             </div>
             <div className="mt-1 text-sm text-gray-600">
               Invoice date: {formatDate(invoice.invoice_date)}
@@ -390,6 +503,16 @@ export default function InvoiceDetailPage() {
             <div className="text-sm text-gray-600">
               Due date: {formatDate(invoice.due_date)}
             </div>
+            {invoice.currency && (
+              <div className="text-sm text-gray-600">
+                Currency: {invoice.currency}
+              </div>
+            )}
+            {invoice.sales_person && (
+              <div className="text-sm text-gray-600">
+                Sales person: {invoice.sales_person}
+              </div>
+            )}
           </div>
         </div>
       </Card>
@@ -442,9 +565,7 @@ export default function InvoiceDetailPage() {
                       </td>
                       <td className="py-2 pl-2 text-right font-medium text-gray-900">
                         {formatCurrency(
-                          it.line_total != null
-                            ? it.line_total
-                            : r.lineTotal
+                          it.line_total != null ? it.line_total : r.lineTotal,
                         )}
                       </td>
                     </tr>
@@ -469,6 +590,18 @@ export default function InvoiceDetailPage() {
               <span>Tax</span>
               <span>{formatCurrency(invoice.tax_amount)}</span>
             </div>
+            {Number(invoice.shipping_charges) > 0 && (
+              <div className="flex justify-between text-gray-600">
+                <span>Shipping</span>
+                <span>{formatCurrency(invoice.shipping_charges)}</span>
+              </div>
+            )}
+            {Number(invoice.additional_charges) > 0 && (
+              <div className="flex justify-between text-gray-600">
+                <span>Additional Charges</span>
+                <span>{formatCurrency(invoice.additional_charges)}</span>
+              </div>
+            )}
             <div className="flex justify-between border-t border-gray-200 pt-1.5 font-semibold text-gray-900">
               <span>Grand Total</span>
               <span>{formatCurrency(invoice.grand_total)}</span>
@@ -485,9 +618,9 @@ export default function InvoiceDetailPage() {
         </div>
       </Card>
 
-      {invoice.notes || invoice.terms ? (
+      {invoice.notes || invoice.terms || invoice.internal_notes ? (
         <Card className="mb-5 p-5">
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
             <div>
               <div className="text-xs uppercase tracking-wide text-gray-400">
                 Notes
@@ -504,19 +637,86 @@ export default function InvoiceDetailPage() {
                 {invoice.terms || "-"}
               </p>
             </div>
+            <div>
+              <div className="text-xs uppercase tracking-wide text-gray-400">
+                Internal Notes
+              </div>
+              <p className="mt-1 whitespace-pre-wrap text-xs font-mono text-gray-600 bg-gray-50 p-2 rounded">
+                {invoice.internal_notes || "-"}
+              </p>
+            </div>
+          </div>
+        </Card>
+      ) : null}
+
+      {invoice.tags?.length > 0 ||
+      invoice.attachments?.length > 0 ||
+      (invoice.custom_fields &&
+        Object.keys(invoice.custom_fields).length > 0) ? (
+        <Card className="mb-5 p-5">
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
+            {invoice.tags?.length > 0 && (
+              <div>
+                <div className="text-xs uppercase tracking-wide text-gray-400">
+                  Tags
+                </div>
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {invoice.tags.map((tag: string, tIdx: number) => (
+                    <span
+                      key={tIdx}
+                      className="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600"
+                    >
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            {invoice.attachments?.length > 0 && (
+              <div>
+                <div className="text-xs uppercase tracking-wide text-gray-400">
+                  Attachments
+                </div>
+                <div className="mt-1.5 space-y-1">
+                  {invoice.attachments.map((att: string, aIdx: number) => (
+                    <a
+                      key={aIdx}
+                      href={att}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block text-xs text-indigo-600 hover:underline truncate"
+                    >
+                      {att}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+            {invoice.custom_fields &&
+              Object.keys(invoice.custom_fields).length > 0 && (
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-gray-400">
+                    Additional Details
+                  </div>
+                  <div className="mt-1.5 space-y-1">
+                    {Object.entries(invoice.custom_fields).map(([k, v]) => (
+                      <div key={k} className="text-xs text-gray-600">
+                        <strong className="text-gray-800">{k}:</strong>{" "}
+                        {String(v)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
           </div>
         </Card>
       ) : null}
 
       <Card className="p-5">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-base font-semibold text-gray-900">
-            Payments
-          </h2>
+          <h2 className="text-base font-semibold text-gray-900">Payments</h2>
           {mayEditPayments ? (
-            <Button onClick={() => setShowPayment(true)}>
-              Record Payment
-            </Button>
+            <Button onClick={() => setShowPayment(true)}>Record Payment</Button>
           ) : null}
         </div>
         <div className="overflow-x-auto">
@@ -606,7 +806,7 @@ function RecordPaymentModal({
   onSuccess: (msg: string) => void;
 }) {
   const [amount, setAmount] = useState<string>(
-    balanceDue != null ? String(balanceDue) : ""
+    balanceDue != null ? String(balanceDue) : "",
   );
   const [method, setMethod] = useState("cash");
   const [date, setDate] = useState(todayInputValue());
@@ -678,10 +878,7 @@ function RecordPaymentModal({
             />
           </Field>
           <Field label="Payment method" required>
-            <Select
-              value={method}
-              onChange={(e) => setMethod(e.target.value)}
-            >
+            <Select value={method} onChange={(e) => setMethod(e.target.value)}>
               {PAYMENT_METHODS.map((m) => (
                 <option key={m.value} value={m.value}>
                   {m.label}

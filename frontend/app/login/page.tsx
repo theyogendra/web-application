@@ -130,7 +130,9 @@ export default function LoginPage() {
           </form>
 
           <div className="mt-6 rounded-lg bg-ink-50 px-3 py-2 text-xs text-ink-500">
-            <p className="font-medium text-ink-700">Default admin credentials</p>
+            <p className="font-medium text-ink-700">
+              Default admin credentials
+            </p>
             <p>admin@enterprise.com / admin123</p>
             <p className="mt-1 text-ink-400">
               Seeded by the users/roles migration. Change in production.

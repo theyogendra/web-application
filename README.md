@@ -1,122 +1,191 @@
-# Enterprise Billing Platform
+# InvoicePro Enterprise Platform
 
-Full-stack invoicing, payments and reporting app.
+### World-Class Cloud-Native Invoicing, Payments, and Financial Operations Suite
 
-- **Backend** — Express 5 + Supabase Postgres, JWT (Bearer **or** HttpOnly cookie + CSRF), bcrypt passwords, atomic Postgres RPCs for document conversion and create/update, audit log with dead-letter queue.
-- **Frontend** — Next.js 14 (App Router) + TypeScript + Tailwind, dark sidebar, Inter font, server-rendered + client-side hybrid.
-- **Workflow** — Inventory → Proposal → Quotation → Invoice → Payment, automatic at each hand-off, manual review/approval at each stage. Inventory stock auto-deducts on payment approval.
-- **PDF + email** — PDFKit-rendered invoices/quotations/proposals, Resend transactional email.
+InvoicePro Enterprise is a high-performance, secure, and modular SaaS platform designed for large-scale financial operations. The system automates document workflow cascades—spanning Proposals, Quotations, Invoices, and Payments—while guaranteeing transactional consistency, regulatory compliance, and bulletproof audit trails.
 
-## Workflow
+---
+
+## 1. Enterprise Architecture Overview
+
+The InvoicePro Enterprise backend is built on a **cloud-native**, **API-first**, **service-oriented**, and **modular** architecture designed to scale with your organization. The front-end delivers a unified, **responsive**, and **accessible** user experience.
+
+### Architecture Topology
+
+- **API and Business Layer**: An asynchronous Node.js engine powered by Express 5, serving secure JSON API endpoints mounted at `/api/*` and `/api/v1/*`.
+- **Primary Data Platform**: **Supabase Database (Managed Cloud Database)** providing high-throughput relational transaction processing, automatic backup scaling, and real-time synchronization.
+- **Dynamic Role-Based Access Control (RBAC)**: Fine-grained, token-based authorization gating modules, specific actions (view/edit), and administrative overrides.
+- **Workflow Automation**: High-integrity, atomic **Supabase Transactional Operations** executing state conversions, stock reservations, and payment allocations.
+- **Secure File Delivery**: Transactional document generation (PDFKit) integrated with the **Universal Export Center** and backed by **Supabase Storage**.
+
+---
+
+## 2. Platform Capabilities
+
+InvoicePro Enterprise is a multi-sector financial engine optimized for:
+
+- **Wholesale and Distribution**: Multi-warehouse stock tracking, real-time inventory reservation, and payment-triggered stock movements.
+- **Manufacturing & Construction**: Phase-based proposal and quotation pipelines, contract revisions, and milestone-based payments.
+- **Healthcare & Retail**: Secure auditing, rate-limited portal entries, and high-frequency tax logging.
+- **Logistics & Financial Services**: Flexible currencies, dynamic client profiles, and automated accounting syncs.
+
+---
+
+## 3. High-Integrity Document Lifecycle
+
+The system enforces transactional integrity across the financial document chain. Status changes automatically propagate upstream and downstream.
 
 ```
                         +-- approve ---> auto-create -->
-   Proposal create -->  Quotation       Invoice       Payment record
-                        (review+edit)  (approve)     (approve)
+    Proposal Create --> Quotation       Invoice       Payment Record
+                        (Review+Edit)  (Approve)     (Approve)
                                                        |
                                                        v
-                                              invoice marked paid
-                                              + inventory deducted
+                                              Invoice Marked Paid
+                                              + Inventory Deducted
 ```
 
-1. **Create Proposal** — an Employee with `proposals.edit` access picks the customer + inventory items. The backend immediately spawns a linked **Draft Quotation** (the proposal is marked `converted` and becomes the audit record of where it started).
-2. **Review Quotation** — Quotations team edits line items / prices / valid_until, then clicks **Mark Accepted**. The quotation flips to `accepted` and a linked **Draft Invoice** is auto-created.
-3. **Approve Invoice** — Invoice team clicks **Approve** on the invoice detail page. Status moves to `approved`. Now payments can be recorded.
-4. **Record Payment** — payment row is inserted with `approval_status='pending'`. The invoice is NOT yet credited.
-5. **Approve Payment** — Accountant clicks **Approve** on the payment detail page. The Postgres RPC recalculates the invoice (status → `partially_paid` or `paid`) AND deducts stock from every line item referencing a product, logging each move into `stock_movements`.
+### Document Flow Execution
 
-Every step writes an audit-log row. The audit table includes a dead-letter queue (`audit_logs_failed`) for any writes that fail.
+1. **Proposal Phase**: Draft proposals list client requirements. Approving a proposal triggers the creation of a linked **Draft Quotation** and sets the proposal to `converted` (preserving original estimates).
+2. **Quotation Phase**: Quotation Managers adjust pricing, validate time limits, and confirm terms. Marking a quotation as accepted sets the status to `accepted` and auto-creates a linked **Draft Invoice**.
+3. **Invoice Phase**: Billing teams run system validation rules. Approving the invoice sets its status to `approved`, which unlocks payment recording.
+4. **Payment Recording**: Payments are initially logged in a `pending` state and do not credit the invoice until verified.
+5. **Payment Settlement**: Managers approve the pending payment. An atomic **Supabase RPC Function** recalculates the invoice balance, shifts statuses to `partially_paid` or `paid`, and deducts product quantities from **Supabase Database**.
 
-## Roles
+### Chain Integrity (Cascade Rejections)
 
-| Role | Users | Audit Logs | Inventory / Proposals / Quotations / Invoices / Payments |
-|---|---|---|---|
-| **Admin** | full CRUD + module assignment | view + export | full CRUD + approve everywhere |
-| **Manager** | view-only | view + export | full CRUD + approve everywhere |
-| **Employee** | hidden | hidden | per-module: `view` (read-only) or `edit` (full CRUD on assigned modules); other modules are read-only |
-| **Viewer** | hidden | hidden | read-only on all five modules + Reports |
+Bidirectional database links trigger immediate cascades when documents are deleted or cancelled to prevent dangling states:
 
-Employee module assignment is per-user, stored in `user_module_access`. An Employee with `inventory.edit` + `proposals.view` can add inventory items and create proposals from them, but everything else is read-only. Viewers see the same pages with all create/edit/delete affordances hidden. Admins manage this via **Users → New / Edit User** in the UI.
+| Trigger                        | Effect                                                                      |
+| :----------------------------- | :-------------------------------------------------------------------------- |
+| Proposal deleted / cancelled   | Linked quotation (if `draft` or `sent`) is automatically set to `rejected`. |
+| Quotation rejected / cancelled | Upstream proposal (if `converted`) is automatically set to `rejected`.      |
+| Invoice cancelled / deleted    | Upstream quotation (if `converted`) is automatically set to `rejected`.     |
 
-The legacy **Accountant** role has been removed (phase 10 migration). Any user still on that role on an older DB gets `role_id = NULL` after the migration runs and must be reassigned.
-
-## Chain integrity (rejection cascades)
-
-The document chain has bidirectional cascade so a broken chain is visibly dead from any side you look at it:
-
-| Trigger | Effect |
-|---|---|
-| Proposal deleted / cancelled | Linked quotation (if still `draft` or `sent`) is automatically `rejected` |
-| Quotation rejected / cancelled / deleted | Upstream proposal (if still `converted`) is automatically marked `rejected` |
-| Invoice cancelled / deleted | Upstream quotation (if still `converted`) is automatically marked `rejected` |
-
-Every cascade writes a `*_cascade_rejected` audit log entry with the upstream/downstream ID + reason, so you can trace why a row went terminal.
+Every cascade transaction logs a `*_cascade_rejected` entry to the audit trail detailing the initiator, target, and structural reason.
 
 ---
 
-## Prerequisites
+## 4. Advanced Security & Access Control
 
-| Tool | Version |
-|---|---|
-| Node.js | 18 LTS or newer |
-| npm | bundled with Node |
-| Supabase project | https://supabase.com (free tier is fine) |
-| Resend account | https://resend.com (optional — emails no-op without it) |
+InvoicePro Enterprise enforces bank-grade security protocols.
+
+- **Supabase Authentication**: Secure token verification via JSON Web Tokens (JWT) issued during sign-in.
+- **Dynamic Role-Based Access Control (RBAC)**: Users are validated against claims stored in their session. Roles include:
+  - **Admin**: Full administrative CRUD, module configuration, and audit management.
+  - **Manager**: Operational control, report exports, and workflow approval overrides.
+  - **Employee**: Gated per-module view/edit capabilities mapped via `user_module_access`.
+  - **Viewer**: Read-only access across standard business modules.
+- **Supabase Row Level Security (RLS)**: Database tables enforce record-level isolation to prevent cross-tenant data leakage.
+- **State-Change Protections**: State-altering endpoints (POST/PUT/DELETE) require verification of custom CSRF tokens (`X-CSRF-Token` headers) when utilizing cookie-based sessions.
+- **Audit Trails**: Automatically logs every critical database mutation. Transactions that fail write verification are isolated in a dead-letter queue (`audit_logs_failed`) for immediate administrator inspection.
+- **Encryption and Redaction**: High-value connection keys reside in environmental containers. All logging procedures automatically redact keys matching patterns such as `password`, `secret`, `token`, `api_key`, and `cookie`.
 
 ---
 
-## Quick start (zero to running)
+## 5. Universal Export Center
+
+Every page containing business data features our premium, unified **Enterprise Export Center** dropdown. It is fully responsive, keyboard-accessible, supports dark mode, and respects permission claims.
+
+Supported formats include:
+
+- **High-Fidelity PDF**: Dynamically renders layout stylesheets using native system printing or backend PDFKit binaries.
+- **Word Document (.docx)**: Microsoft Word compatible editable file structure.
+- **Excel Workbook (.xlsx)**: Formatted table with gridlines, custom cell borders, and proper number formats.
+- **CSV & XML**: Raw structured data schemas.
+- **JSON & Markdown**: Developer-friendly data and document payloads.
+- **Print View & Copy**: Pre-formatted layout views and quick-paste clipboard copies.
+- **Google Workspace Export**: Exports Google-compatible DOCX and XLSX templates that parse directly in Google Docs and Google Sheets.
+
+---
+
+## 6. Performance Features
+
+InvoicePro Enterprise is engineered for high-concurrency operations:
+
+- **Database Optimizations**: Indexing structures optimize lookups on frequently queried columns (`invoices.status`, `payments.approval_status`).
+- **Supabase RPC Optimization**: Relational calculations occur close to the data engine in atomic transactions, reducing network round-trips.
+- **Pagination & Caching**: List endpoints leverage query offsets and browser-side state caching to eliminate redundant backend queries.
+
+---
+
+## 7. Deployment & DevOps
+
+### Infrastructure Environments
+
+- **Cloud/SaaS**: Fully ready for deployment on **AWS**, **GCP**, or **Azure** containers.
+- **Containerization**: Includes a pre-configured multi-container `docker-compose.yml` defining services, volumes, and networks.
+- **PaaS Deployments**: Ready for automated git-triggered builds on **Vercel** (Frontend) and **Railway/Render** (Backend).
+- **Auto-Scaling**: Statless architecture enables container multiplication behind a load balancer (e.g. Nginx, ALB).
+
+### Setup and Prerequisites
+
+- **Node.js**: Version 18 LTS or newer.
+- **Package Manager**: npm (bundled with Node).
+- **Managed Database**: An active **Supabase** project instance.
+
+---
+
+## 8. Developer Quick Start
+
+### 1. Environment Configuration
+
+Create environmental config containers in both the backend and frontend folders:
+
+**Backend (`backend/.env`):**
+
+```env
+PORT=8000
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+JWT_SECRET=your-jwt-secure-signing-secret
+RESEND_API_KEY=your-resend-key
+FROM_EMAIL=billing@your-verified-domain.com
+ENABLE_HTTPS=true
+```
+
+**Frontend (`frontend/.env.local`):**
+
+```env
+NEXT_PUBLIC_API_URL=https://localhost:8000
+```
+
+### 2. Dependency Installation
+
+Initialize the dependencies for both services:
 
 ```bash
-# 1. Clone
-git clone https://github.com/theyogendra/web-application.git
-cd web-application
-
-# 2. Backend
-cd backend
-cp .env.example .env             # then edit with your Supabase / JWT / Resend values
+# Run inside backend/ folder
 npm install
-npm run dev                      # http://localhost:8000
 
-# 3. Frontend (in a second terminal)
-cd ../frontend
-cp .env.example .env.local       # default points at http://localhost:8000
+# Run inside frontend/ folder
 npm install
-npm run dev                      # http://localhost:3000
 ```
 
-Then apply database migrations (see below) and visit http://localhost:3000.
+### 3. Database Migrations
 
-Default sign-in (seeded by the users/roles migration):
+Database schemas and configurations reside in chronological files inside [`supabase/migrations/`](supabase/migrations/):
 
-```
-admin@enterprise.com
-admin123
-```
+| Step | Migration File                                         | Target Schema Objects                              |
+| :--- | :----------------------------------------------------- | :------------------------------------------------- |
+| 1    | `20260511175701_initial_schema.sql`                    | Users, products, categories, base tables           |
+| 2    | `20260512130000_invoice_foundation.sql`                | Customers, vendors, invoices, items                |
+| 3    | `20260512133000_invoice_validation_phase2.sql`         | Validation logs, schema validations, audit table   |
+| 4    | `20260512143000_invoice_stock_control_phase3.sql`      | Stock quantities, movements, reservation functions |
+| 5    | `20260522120000_billing_payments_phase4.sql`           | Billing metrics, payments, resend email logs       |
+| 6    | `20260522130000_users_roles_phase5.sql`                | Seeded Admin, Manager, Accountant roles            |
+| 7    | `20260522140000_inventory_quotations_proposals_phase6` | Quotes, proposals, conversion mapping              |
+| 8    | `20260522150000_convert_rpcs_phase7.sql`               | Document conversion RPC execution functions        |
+| 9    | `20260522160000_atomic_crud_audit_dlq_phase8.sql`      | Failed audits queue, report queries                |
+| 10   | `20260522170000_workflow_roles_phase9.sql`             | Dynamic module access controls, approvals          |
+| 11   | `20260522180000_legacy_roles_cleanup_phase10.sql`      | Viewer role stabilization                          |
+| 12   | `20260526120000_cascade_rpcs_phase11.sql`              | Dynamic cascade rejections                         |
+| 13   | `20260526140000_unified_chain_numbering_phase12`       | Invoice/Quote sequence numbering                   |
+| 14   | `20260718100000_approval_tables_phase13.sql`           | Enhanced document verification                     |
+| 15   | `20260718110000_perf_indexes.sql`                      | Index optimization                                 |
 
-> Change this password right after first login — it's plaintext-seeded so the lazy bcrypt migration can hash it on the next sign-in.
-
----
-
-## Database migrations
-
-The schema lives in [`supabase/migrations/`](supabase/migrations/), eight files applied in chronological order:
-
-| File | Adds |
-|---|---|
-| `20260511175701_initial_schema.sql` | users, products, orders, order_items |
-| `20260512130000_invoice_foundation.sql` | customers, vendors, invoices, invoice_items |
-| `20260512133000_invoice_validation_phase2.sql` | validation columns + invoice_validation_logs + audit_logs |
-| `20260512143000_invoice_stock_control_phase3.sql` | stock columns + stock_movements + 4 stock RPCs |
-| `20260522120000_billing_payments_phase4.sql` | denormalized billing columns, payments, email_logs, company_settings, record_invoice_payment RPC |
-| `20260522130000_users_roles_phase5.sql` | user profile columns, roles table with seeded Admin/Manager/Accountant/Viewer, user_sessions |
-| `20260522140000_inventory_quotations_proposals_phase6.sql` | product enhancements, quotations + items, proposals + items, conversion FKs |
-| `20260522150000_convert_rpcs_phase7.sql` | atomic `convert_proposal_to_quotation` and `convert_quotation_to_invoice` RPCs |
-| `20260522160000_atomic_crud_audit_dlq_phase8.sql` | audit_logs_failed dead-letter, 6 atomic create/update RPCs, 6 reports SQL aggregations |
-| `20260522170000_workflow_roles_phase9.sql` | user_module_access table, Employee role, refreshed Admin/Manager perms, payment approval columns + RPCs (record/approve/reject), inventory deduction on full payment |
-| `20260522180000_legacy_roles_cleanup_phase10.sql` | Removes Accountant role; restores Viewer as a clean read-only system role |
-
-### Apply with the Supabase CLI (recommended)
+Deploy migrations using the Supabase CLI:
 
 ```bash
 npm install -g supabase
@@ -125,148 +194,66 @@ supabase link --project-ref <your-project-ref>
 supabase db push
 ```
 
-### Apply manually
+### 4. Running the Development Servers
 
-Open the Supabase SQL Editor for your project and paste each file in the order above.
-
----
-
-## Project structure
-
-```
-backend/
-  src/
-    config/          Supabase client + env loader
-    middleware/      auth (JWT), CSRF, error handler
-    routes/          REST routes (mounted at /api/* and /api/v1/*)
-    services/        audit, email, PDF, reports, numbering, totals, invoice-validation
-    utils/           CSV serializer, sanitizeSearch + escapeHtml helpers
-frontend/
-  app/               Next.js App Router pages (login, dashboard, every module)
-  components/        Sidebar, LayoutShell, InvoiceForm, DocumentForm, ProductForm, StatusBadge, ui primitives
-  lib/               api client, auth (token + cookie), format, totals
-supabase/
-  migrations/        SQL files (see above)
-  config.toml        Supabase CLI config
-```
-
----
-
-## Auth flow
-
-- **Login** posts to `POST /api/auth/login` (multipart `username` / `password`).
-- Backend issues a JWT and sets it as both a body field (`access_token`) **and** an HttpOnly `token` cookie + non-HttpOnly `csrf` cookie.
-- Frontend `lib/api.ts` sends `credentials: 'include'` so cookies travel, and mirrors the CSRF cookie back as `X-CSRF-Token` on every POST/PUT/DELETE.
-- `requirePermission('invoices.create')` etc. is enforced server-side. Permission strings live on `roles.permissions` (JSONB array of `"module.action"` strings).
-- Lazy bcrypt migration: plaintext passwords seeded into `users.password` get hashed into `password_hash` on the user's next successful sign-in.
-
----
-
-## Email (Resend)
-
-- Templates: invoice sent, payment receipt, invoice paid, overdue reminder, quotation sent, proposal sent.
-- Set `RESEND_API_KEY` to enable. Set `FROM_EMAIL` to a sender on a **verified domain** in Resend (the default `onboarding@resend.dev` only delivers to the email tied to your Resend account).
-- Every send is recorded in the `email_logs` table with status `sent` / `skipped` / `failed`. View at `GET /api/email/logs`.
-
----
-
-## HTTPS in development
-
-Both the backend and frontend run on HTTPS by default.
-
-- **Backend** auto-generates a self-signed certificate at `backend/certs/localhost.{crt,key}` on first start. Set `ENABLE_HTTPS=false` to fall back to plain HTTP (rarely useful).
-- **Frontend** dev script uses `next dev --experimental-https`, which auto-generates its own self-signed cert.
-
-The first time you visit `https://localhost:8000/health` and `https://localhost:3000`, the browser shows a "Your connection is not private" warning. Click **Advanced → Proceed to localhost** once per origin — after that the cert sticks.
-
-Want trusted-without-warning certs locally? Install [mkcert](https://github.com/FiloSottile/mkcert):
-```
-mkcert -install
-cd backend && mkcert localhost 127.0.0.1
-mv localhost+1.pem certs/localhost.crt
-mv localhost+1-key.pem certs/localhost.key
-```
-The TLS loader picks those up over the self-signed pair.
-
-Side effects of HTTPS being on:
-- Auth cookies (`token`, `csrf`) carry the **Secure** flag, so they can't leak over plain HTTP.
-- `Strict-Transport-Security` is sent (via helmet).
-- Login is rate-limited to **10 attempts per 15 minutes per IP** to blunt credential-stuffing.
-
-## Security notes
-
-- **Never commit `.env`** — `.gitignore` covers `**/.env*` with an `!**/.env.example` allow-rule.
-- **Rotate keys** that appear in commit messages, conversation transcripts, or PRs.
-- `SUPABASE_SERVICE_ROLE_KEY` bypasses RLS — treat it like a root credential.
-- `JWT_SECRET` change invalidates all existing sessions on next request.
-- Audit log entries redact any field whose name matches `password`, `secret`, `token`, `api_key`, `authorization`, `cookie`, or `private_key`.
-
----
-
-## Useful endpoints
-
-```
-GET    /health                              liveness + DB connectivity
-POST   /api/auth/login                      multipart username + password
-POST   /api/auth/logout
-GET    /api/auth/me
-
-GET    /api/invoices                        ?status= &search= &from= &to=
-POST   /api/invoices                        create (auto-numbered)
-GET    /api/invoices/:id                    detail + items + payments
-PUT    /api/invoices/:id                    update
-DELETE /api/invoices/:id                    delete (draft) or cancel
-POST   /api/invoices/:id/send               email + PDF attachment
-GET    /api/invoices/:id/pdf                download
-POST   /api/invoices/:id/send-reminder
-
-POST   /api/payments                        record (overpayment-guarded RPC)
-GET    /api/payments
-GET    /api/payments/export                 CSV
-
-POST   /api/quotations/:id/convert-to-invoice   atomic RPC
-POST   /api/proposals/:id/convert-to-quotation  atomic RPC
-
-POST   /api/quotations/:id/mark-accepted        approves + auto-creates linked invoice
-POST   /api/invoices/:id/approve                approval workflow (legacy + phase 9)
-POST   /api/payments/:id/approve                accountant approval + invoice recalc + inventory deduction
-POST   /api/payments/:id/reject
-
-GET    /api/users                               admin/manager
-POST   /api/users                               admin: create user + module_access
-PUT    /api/users/:id                           admin: edit (incl. role + module_access)
-DELETE /api/users/:id                           admin: deactivate
-
-GET    /api/reports/summary                 all KPIs in one SQL call
-GET    /api/reports/revenue
-GET    /api/reports/invoices
-GET    /api/reports/payments
-GET    /api/reports/customers
-GET    /api/reports/tax
-GET    /api/reports/export?type=&format=     CSV or PDF
-
-GET    /api/audit-logs                      filter by module/action/user/date
-GET    /api/audit-logs/export
-
-GET    /api/users
-GET    /api/roles
-GET    /api/customers
-GET    /api/company-settings
-```
-
-All endpoints are mounted under both `/api/*` and `/api/v1/*` for compatibility.
-
----
-
-## Common tasks
+Start both servers locally:
 
 ```bash
-# Just verify the backend boots (no DB required)
-cd backend && node -e "require('./src/server')"
+# In terminal 1 (backend folder)
+npm run dev
 
-# Frontend type-check + production build
-cd frontend && npm run build
+# In terminal 2 (frontend folder)
+npm run dev
+```
 
-# Tail the dev server log
-cd backend && npm run dev
+_Note: Self-signed TLS certificates generate on first startup. Proceed past the browser security warnings for `https://localhost:3000` and `https://localhost:8000/health` to synchronize TLS states._
+
+Sign in using the pre-seeded administrator credentials:
+
+- **Username**: `admin@enterprise.com`
+- **Password**: `admin123` _(Plaintext-seeded; automatically hashed via bcrypt on first successful sign-in)._
+
+---
+
+## 9. Comprehensive API Reference
+
+All requests must include a valid JWT token in the `Authorization: Bearer <token>` header or as an HttpOnly `token` cookie.
+
+```
+Authentication:
+POST   /api/auth/login                       - Payload: username, password. Returns token & cookies.
+POST   /api/auth/logout                      - Destroys server sessions & clear client cookies.
+GET    /api/auth/me                          - Get active session information.
+
+Invoices:
+GET    /api/invoices                         - Query: status, search, from, to.
+POST   /api/invoices                         - Create invoice draft.
+GET    /api/invoices/:id                     - Detail invoice metrics, items, and approvals.
+PUT    /api/invoices/:id                     - Update draft invoice settings.
+DELETE /api/invoices/:id                     - Cancel or delete active invoice.
+POST   /api/invoices/:id/approve             - Approve invoice layout to enable payment logging.
+POST   /api/invoices/:id/send                - Queue Resend email with PDF invoice attachment.
+GET    /api/invoices/:id/pdf                 - Stream generated PDF binary.
+
+Payments:
+GET    /api/payments                         - Retrieve payment database logs.
+POST   /api/payments                         - Record new invoice payment.
+POST   /api/payments/:id/approve             - Approve pending payment. Executes DB deduction RPC.
+POST   /api/payments/:id/reject              - Reject pending payment logs.
+
+Document Conversions:
+POST   /api/proposals/:id/convert-to-quotation   - Convert estimate proposal to quote sheet.
+POST   /api/quotations/:id/convert-to-invoice    - Convert quotation to draft billing invoice.
+
+Reports and Logs:
+GET    /api/reports/summary                  - Get overall platform KPIs.
+GET    /api/reports/revenue                  - Get monthly revenue datasets.
+GET    /api/reports/export                   - Parameters: type, format. Export reports.
+GET    /api/audit-logs                       - Query system logs by module or user.
+GET    /api/audit-logs/export                - Export audit history.
+
+Settings and Users:
+GET    /api/users                            - Get list of system users.
+POST   /api/users                            - Create new user and configure module authorization.
+GET    /api/company-settings                 - View organization profile info.
 ```

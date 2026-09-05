@@ -32,6 +32,32 @@ export default function TopNavbar() {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
+  const [notifOpen, setNotifOpen] = useState(false);
+  const notifRef = useRef<HTMLDivElement>(null);
+  const [notifications, setNotifications] = useState([
+    {
+      id: "1",
+      title: "New Invoice #INV-1004",
+      description: "Created draft invoice for client Acme Corp.",
+      time: "5m ago",
+      read: false,
+    },
+    {
+      id: "2",
+      title: "Payment approved",
+      description: "Payment of ₹15,000 for #INV-1002 approved.",
+      time: "1h ago",
+      read: false,
+    },
+    {
+      id: "3",
+      title: "Stock warning",
+      description: "Product 'Server Rack' is low on stock (2 items left).",
+      time: "2h ago",
+      read: true,
+    },
+  ]);
+
   useEffect(() => {
     setUser(getUser());
     setLocalTheme(getEffectiveTheme());
@@ -43,7 +69,7 @@ export default function TopNavbar() {
     return () =>
       window.removeEventListener(
         "theme:changed",
-        onThemeChanged as EventListener
+        onThemeChanged as EventListener,
       );
   }, []);
 
@@ -58,6 +84,29 @@ export default function TopNavbar() {
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, [menuOpen]);
 
+  // Close the notification menu on outside click.
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+        setNotifOpen(false);
+      }
+    }
+    if (notifOpen) document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [notifOpen]);
+
+  // Keyboard accessibility: Escape closes dropdowns
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setMenuOpen(false);
+        setNotifOpen(false);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
   function handleToggleTheme() {
     setLocalTheme(toggleTheme());
   }
@@ -68,7 +117,23 @@ export default function TopNavbar() {
     router.replace("/login");
   }
 
-  const initial = (user?.full_name || user?.email || "?").charAt(0).toUpperCase();
+  function handleMarkRead(id: string) {
+    setNotifications((prev) =>
+      prev.map((n) => (n.id === id ? { ...n, read: true } : n)),
+    );
+  }
+
+  function handleMarkAllRead() {
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  }
+
+  function handleClearAll() {
+    setNotifications([]);
+  }
+
+  const initial = (user?.full_name || user?.email || "?")
+    .charAt(0)
+    .toUpperCase();
   const isDark = theme === "dark";
 
   return (
@@ -99,15 +164,89 @@ export default function TopNavbar() {
           {isDark ? <Sun size={17} /> : <Moon size={17} />}
         </button>
 
-        <button
-          type="button"
-          aria-label="Notifications"
-          className="relative flex h-9 w-9 items-center justify-center rounded-lg text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-subtle)] hover:text-[var(--text-primary)]"
-        >
-          <Bell size={17} />
-          {/* Placeholder dot — wire to real notifications later */}
-          <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-[#FF3B30]" />
-        </button>
+        {/* Notifications */}
+        <div ref={notifRef} className="relative">
+          <button
+            type="button"
+            onClick={() => setNotifOpen((o) => !o)}
+            aria-label="Notifications"
+            aria-haspopup="true"
+            aria-expanded={notifOpen}
+            className="relative flex h-9 w-9 items-center justify-center rounded-lg text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-subtle)] hover:text-[var(--text-primary)]"
+          >
+            <Bell size={17} />
+            {notifications.some((n) => !n.read) && (
+              <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-[#FF3B30]" />
+            )}
+          </button>
+
+          {notifOpen && (
+            <div className="surface-elevated animate-fade-in-up absolute right-0 mt-2 w-80 rounded-xl border border-[var(--separator-soft)] py-2 shadow-soft z-50">
+              <div className="flex items-center justify-between border-b border-[var(--separator-soft)] px-4 py-2">
+                <span className="text-[13.5px] font-semibold text-[var(--text-primary)]">
+                  Notifications
+                </span>
+                {notifications.some((n) => !n.read) && (
+                  <button
+                    type="button"
+                    onClick={handleMarkAllRead}
+                    className="text-[11px] font-medium text-[#0071E3] hover:underline"
+                  >
+                    Mark all as read
+                  </button>
+                )}
+              </div>
+              <div className="max-h-64 overflow-y-auto">
+                {notifications.length === 0 ? (
+                  <div className="px-4 py-6 text-center text-[13px] text-[var(--text-tertiary)]">
+                    No new notifications
+                  </div>
+                ) : (
+                  notifications.map((n) => (
+                    <div
+                      key={n.id}
+                      onClick={() => handleMarkRead(n.id)}
+                      className={`flex flex-col gap-0.5 border-b border-[var(--separator-soft)]/50 px-4 py-2.5 last:border-b-0 cursor-pointer transition-colors ${
+                        n.read
+                          ? "hover:bg-[var(--bg-subtle)]"
+                          : "bg-[#0071E3]/5 hover:bg-[#0071E3]/10"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span
+                          className={`text-[12.5px] font-medium ${
+                            n.read
+                              ? "text-[var(--text-primary)]"
+                              : "text-[#0071E3]"
+                          }`}
+                        >
+                          {n.title}
+                        </span>
+                        <span className="text-[10px] text-[var(--text-tertiary)] whitespace-nowrap">
+                          {n.time}
+                        </span>
+                      </div>
+                      <p className="text-[11.5px] text-[var(--text-secondary)] leading-normal">
+                        {n.description}
+                      </p>
+                    </div>
+                  ))
+                )}
+              </div>
+              {notifications.length > 0 && (
+                <div className="flex justify-end border-t border-[var(--separator-soft)] px-4 pt-1.5">
+                  <button
+                    type="button"
+                    onClick={handleClearAll}
+                    className="text-[11px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] transition-colors"
+                  >
+                    Clear all
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         <div className="mx-2 h-6 w-px bg-[var(--separator)]" />
 
@@ -116,6 +255,8 @@ export default function TopNavbar() {
           <button
             type="button"
             onClick={() => setMenuOpen((o) => !o)}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
             className="flex items-center gap-2.5 rounded-lg p-1 pr-3 transition-colors hover:bg-[var(--bg-subtle)]"
           >
             <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-[#0A84FF] to-[#0071E3] text-[13px] font-semibold text-white">
@@ -152,8 +293,10 @@ export default function TopNavbar() {
               <MenuItem
                 icon={<Settings size={14} />}
                 label="Settings"
-                onClick={() => setMenuOpen(false)}
-                disabled
+                onClick={() => {
+                  setMenuOpen(false);
+                  router.push("/settings");
+                }}
               />
               <div className="my-1 h-px bg-[var(--separator-soft)]" />
               <MenuItem
@@ -196,7 +339,9 @@ function MenuItem({
         disabled ? "cursor-not-allowed opacity-50" : "",
       ].join(" ")}
     >
-      <span className={danger ? "text-[#FF3B30]" : "text-[var(--text-tertiary)]"}>
+      <span
+        className={danger ? "text-[#FF3B30]" : "text-[var(--text-tertiary)]"}
+      >
         {icon}
       </span>
       <span className="flex-1 text-left">{label}</span>

@@ -96,7 +96,10 @@ export default function UserForm({
   // On edit, password is optional — only included when the user opts in.
   const [changePassword, setChangePassword] = useState(false);
 
-  function setField<K extends keyof UserFormValues>(field: K, value: UserFormValues[K]) {
+  function setField<K extends keyof UserFormValues>(
+    field: K,
+    value: UserFormValues[K],
+  ) {
     setValues((v) => ({ ...v, [field]: value }));
   }
 
@@ -197,9 +200,7 @@ export default function UserForm({
       {rolesError ? <ErrorState message={rolesError} /> : null}
 
       <Card className="p-5">
-        <h2 className="mb-4 text-base font-semibold text-gray-900">
-          Account
-        </h2>
+        <h2 className="mb-4 text-base font-semibold text-gray-900">Account</h2>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label="Name" required>
             <TextInput
@@ -322,7 +323,11 @@ export default function UserForm({
                         onChange={() => setModuleAccess(m.key, opt)}
                       />
                       <span className="sm:hidden">
-                        {opt === "none" ? "No access" : opt === "view" ? "View" : "Edit"}
+                        {opt === "none"
+                          ? "No access"
+                          : opt === "view"
+                            ? "View"
+                            : "Edit"}
                       </span>
                     </label>
                   ))}

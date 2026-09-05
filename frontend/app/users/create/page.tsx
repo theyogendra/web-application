@@ -2,9 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { apiPost } from "@/lib/api";
-import UserForm, {
-  buildInitialUserValues,
-} from "@/components/UserForm";
+import UserForm, { buildInitialUserValues } from "@/components/UserForm";
 import { PageHeader } from "@/components/ui";
 
 export default function CreateUserPage() {

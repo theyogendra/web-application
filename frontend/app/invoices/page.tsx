@@ -18,13 +18,35 @@ import {
   Select,
   TextInput,
 } from "@/components/ui";
+import ExportButton from "@/components/ExportButton";
+import { ExportColumn } from "@/lib/ExportService";
+
+const INVOICE_COLUMNS: ExportColumn[] = [
+  { label: "Invoice Number", key: "invoice_number" },
+  { label: "Customer Name", key: "customer_name" },
+  { label: "Customer Email", key: "customer_email" },
+  { label: "Invoice Date", key: "invoice_date" },
+  { label: "Due Date", key: "due_date" },
+  { label: "Subtotal", key: "subtotal" },
+  { label: "Discount", key: "discount" },
+  { label: "Tax", key: "tax_amount" },
+  { label: "Grand Total", key: "grand_total" },
+  { label: "Paid", key: "paid_amount" },
+  { label: "Balance", key: "balance_due" },
+  { label: "Status", key: "status" },
+];
 
 const STATUS_OPTIONS = [
   { value: "", label: "All statuses" },
   { value: "draft", label: "Draft" },
+  { value: "needs_review", label: "Needs Review" },
+  { value: "submitted", label: "Submitted" },
+  { value: "pending_approval", label: "Pending Approval" },
+  { value: "approved", label: "Approved" },
   { value: "sent", label: "Sent" },
   { value: "partially_paid", label: "Partially Paid" },
   { value: "paid", label: "Paid" },
+  { value: "rejected", label: "Rejected" },
   { value: "cancelled", label: "Cancelled" },
 ];
 
@@ -90,11 +112,19 @@ export default function InvoicesPage() {
         title="Invoices"
         description="Create, track and manage customer invoices."
         actions={
-          mayEdit ? (
-            <Link href="/invoices/create">
-              <Button>+ New Invoice</Button>
-            </Link>
-          ) : null
+          <div className="flex items-center gap-3">
+            <ExportButton
+              title="Invoices Report"
+              filename={`Invoices_Report_${new Date().toISOString().slice(0, 10)}`}
+              columns={INVOICE_COLUMNS}
+              data={invoices}
+            />
+            {mayEdit ? (
+              <Link href="/invoices/create">
+                <Button>+ New Invoice</Button>
+              </Link>
+            ) : null}
+          </div>
         }
       />
 
@@ -104,10 +134,7 @@ export default function InvoicesPage() {
           className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5"
         >
           <Field label="Status">
-            <Select
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-            >
+            <Select value={status} onChange={(e) => setStatus(e.target.value)}>
               {STATUS_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
@@ -182,9 +209,7 @@ export default function InvoicesPage() {
                       {inv.invoice_number}
                     </td>
                     <td className="px-4 py-3">
-                      <div className="text-gray-900">
-                        {inv.customer_name}
-                      </div>
+                      <div className="text-gray-900">{inv.customer_name}</div>
                       <div className="text-xs text-gray-400">
                         {inv.customer_email}
                       </div>

@@ -16,6 +16,25 @@ import {
   Select,
   TextInput,
 } from "@/components/ui";
+import ExportButton from "@/components/ExportButton";
+import { ExportColumn } from "@/lib/ExportService";
+
+const AUDIT_COLUMNS: ExportColumn[] = [
+  {
+    label: "Time",
+    key: "created_at",
+    value: (row: any) =>
+      row.created_at
+        ? new Date(row.created_at).toISOString().replace("T", " ").slice(0, 19)
+        : "",
+  },
+  { label: "User Name", key: "user_name" },
+  { label: "Action", key: "action" },
+  { label: "Module", key: "module" },
+  { label: "Entity Type", key: "entity_type" },
+  { label: "Entity ID", key: "entity_id" },
+  { label: "IP Address", key: "ip_address" },
+];
 
 // Values MUST match the Title-Case strings the backend audit service writes
 // (see backend/src/services/audit.service.js#moduleForAction). Lower-case
@@ -102,22 +121,6 @@ export default function AuditLogsPage() {
     setTimeout(load, 0);
   }
 
-  async function handleExport() {
-    setExportError(null);
-    setExporting(true);
-    try {
-      const qs = buildParams().toString();
-      await downloadFile(
-        "/audit-logs/export" + (qs ? "?" + qs : ""),
-        "audit-logs.csv"
-      );
-    } catch (err: any) {
-      setExportError(err?.message || "Failed to export audit logs.");
-    } finally {
-      setExporting(false);
-    }
-  }
-
   if (!allowed) {
     return <Loading label="Redirecting..." />;
   }
@@ -128,21 +131,16 @@ export default function AuditLogsPage() {
         title="Audit Logs"
         description="System activity across all modules."
         actions={
-          <Button
-            variant="secondary"
-            onClick={handleExport}
-            disabled={exporting}
-          >
-            {exporting ? "Exporting..." : "Export CSV"}
-          </Button>
+          <ExportButton
+            title="Audit Logs Report"
+            filename={`Audit_Logs_Report_${new Date().toISOString().slice(0, 10)}`}
+            columns={AUDIT_COLUMNS}
+            data={logs}
+            pdfUrl={`/audit-logs/export${buildParams().toString() ? "?" + buildParams().toString() : ""}`}
+            requiredPermission="audit_logs.export"
+          />
         }
       />
-
-      {exportError ? (
-        <div className="mb-4">
-          <ErrorState message={exportError} />
-        </div>
-      ) : null}
 
       <Card className="mb-5 p-4">
         <form

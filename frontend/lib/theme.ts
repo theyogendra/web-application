@@ -24,8 +24,24 @@ export function getEffectiveTheme(): Theme {
 export function applyTheme(t: Theme): void {
   if (typeof document === "undefined") return;
   const root = document.documentElement;
+
+  // Temporarily disable CSS transitions during class toggle to prevent
+  // intermediate color interpolation (white flash) across contrasting themes.
+  const css = document.createElement("style");
+  css.appendChild(
+    document.createTextNode(
+      "* { -webkit-transition: none !important; -moz-transition: none !important; -o-transition: none !important; -ms-transition: none !important; transition: none !important; }",
+    ),
+  );
+  document.head.appendChild(css);
+
   if (t === "dark") root.classList.add("dark");
   else root.classList.remove("dark");
+
+  // Force synchronous reflow so theme class change applies immediately
+  window.getComputedStyle(root).opacity;
+
+  document.head.removeChild(css);
 }
 
 export function setTheme(t: Theme): void {

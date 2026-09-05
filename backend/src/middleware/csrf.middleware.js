@@ -13,10 +13,10 @@
 // Bearer-token clients (curl, mobile, server-to-server) bypass CSRF because
 // they don't carry cookies and aren't subject to CSRF in the first place.
 
-const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const EXEMPT_PATHS = [
   /^\/api(?:\/v1)?\/auth\/login$/,
-  /^\/api(?:\/v1)?\/auth\/logout$/
+  /^\/api(?:\/v1)?\/auth\/logout$/,
 ];
 
 function isExempt(path) {
@@ -31,11 +31,11 @@ function csrfMiddleware(req, res, next) {
   // No cookie session -> Bearer/anonymous -> CSRF doesn't apply.
   if (!req.cookies || !req.cookies.token) return next();
 
-  const header = req.headers['x-csrf-token'];
+  const header = req.headers["x-csrf-token"];
   const cookie = req.cookies.csrf;
 
   if (!header || !cookie || header !== cookie) {
-    return res.status(403).json({ detail: 'Invalid or missing CSRF token' });
+    return res.status(403).json({ detail: "Invalid or missing CSRF token" });
   }
   next();
 }

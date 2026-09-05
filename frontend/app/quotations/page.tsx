@@ -18,6 +18,21 @@ import {
   Select,
   TextInput,
 } from "@/components/ui";
+import ExportButton from "@/components/ExportButton";
+import { ExportColumn } from "@/lib/ExportService";
+
+const QUOTATION_COLUMNS: ExportColumn[] = [
+  { label: "Quotation Number", key: "quotation_number" },
+  { label: "Customer Name", key: "customer_name" },
+  { label: "Customer Email", key: "customer_email" },
+  { label: "Date", key: "quotation_date" },
+  { label: "Valid Until", key: "valid_until" },
+  { label: "Subtotal", key: "subtotal" },
+  { label: "Discount", key: "discount" },
+  { label: "Tax", key: "tax_amount" },
+  { label: "Grand Total", key: "grand_total" },
+  { label: "Status", key: "status" },
+];
 
 const STATUS_OPTIONS = [
   { value: "", label: "All statuses" },
@@ -90,11 +105,19 @@ export default function QuotationsPage() {
         title="Quotations"
         description="Send quotations and convert them to invoices when accepted."
         actions={
-          mayEdit ? (
-            <Link href="/quotations/create">
-              <Button>+ New Quotation</Button>
-            </Link>
-          ) : null
+          <div className="flex items-center gap-3">
+            <ExportButton
+              title="Quotations Report"
+              filename={`Quotations_Report_${new Date().toISOString().slice(0, 10)}`}
+              columns={QUOTATION_COLUMNS}
+              data={items}
+            />
+            {mayEdit ? (
+              <Link href="/quotations/create">
+                <Button>+ New Quotation</Button>
+              </Link>
+            ) : null}
+          </div>
         }
       />
 
@@ -104,10 +127,7 @@ export default function QuotationsPage() {
           className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5"
         >
           <Field label="Status">
-            <Select
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-            >
+            <Select value={status} onChange={(e) => setStatus(e.target.value)}>
               {STATUS_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}

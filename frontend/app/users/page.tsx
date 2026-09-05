@@ -17,6 +17,31 @@ import {
   Select,
   TextInput,
 } from "@/components/ui";
+import ExportButton from "@/components/ExportButton";
+import { ExportColumn } from "@/lib/ExportService";
+
+const USER_COLUMNS: ExportColumn[] = [
+  { label: "Name", key: "full_name" },
+  { label: "Email", key: "email" },
+  {
+    label: "Role",
+    key: "role_name",
+    value: (row: any) => row.roles?.name || "Employee",
+  },
+  {
+    label: "Status",
+    key: "is_active",
+    value: (row: any) => (row.is_active ? "Active" : "Inactive"),
+  },
+  {
+    label: "Created At",
+    key: "created_at",
+    value: (row: any) =>
+      row.created_at
+        ? new Date(row.created_at).toISOString().replace("T", " ").slice(0, 19)
+        : "",
+  },
+];
 
 export default function UsersPage() {
   const router = useRouter();
@@ -79,11 +104,20 @@ export default function UsersPage() {
         title="Users"
         description="Manage staff accounts, roles and per-module access."
         actions={
-          admin ? (
-            <Link href="/users/create">
-              <Button>+ New User</Button>
-            </Link>
-          ) : null
+          <div className="flex items-center gap-3">
+            <ExportButton
+              title="Users Report"
+              filename={`Users_Report_${new Date().toISOString().slice(0, 10)}`}
+              columns={USER_COLUMNS}
+              data={users}
+              requiredPermission="users.export"
+            />
+            {admin ? (
+              <Link href="/users/create">
+                <Button>+ New User</Button>
+              </Link>
+            ) : null}
+          </div>
         }
       />
 
@@ -194,7 +228,9 @@ export default function UsersPage() {
                         )}
                       </td>
                       <td className="px-4 py-3 text-gray-600">
-                        {u.last_login_at ? formatDateTime(u.last_login_at) : "Never"}
+                        {u.last_login_at
+                          ? formatDateTime(u.last_login_at)
+                          : "Never"}
                       </td>
                     </tr>
                   );

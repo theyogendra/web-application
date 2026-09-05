@@ -4,7 +4,12 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { apiGet, apiPost } from "@/lib/api";
-import { formatCurrency, formatDate, formatDateTime, titleCase } from "@/lib/format";
+import {
+  formatCurrency,
+  formatDate,
+  formatDateTime,
+  titleCase,
+} from "@/lib/format";
 import { canEdit as canEditModule } from "@/lib/auth";
 import {
   Button,
@@ -15,6 +20,32 @@ import {
   PageHeader,
   TextArea,
 } from "@/components/ui";
+import ExportButton from "@/components/ExportButton";
+import { ExportColumn } from "@/lib/ExportService";
+
+const SINGLE_PAYMENT_COLUMNS: ExportColumn[] = [
+  { label: "Payment Number", key: "payment_number" },
+  {
+    label: "Invoice Number",
+    key: "invoice_number",
+    value: (row: any) => row.invoices?.invoice_number || "",
+  },
+  {
+    label: "Customer Name",
+    key: "customer_name",
+    value: (row: any) => row.invoices?.customer_name || "",
+  },
+  { label: "Amount", key: "amount" },
+  {
+    label: "Method",
+    key: "payment_method",
+    value: (row: any) => titleCase(row.payment_method),
+  },
+  { label: "Date", key: "payment_date" },
+  { label: "Reference Number", key: "reference_number" },
+  { label: "Approval Status", key: "approval_status" },
+  { label: "Notes", key: "notes" },
+];
 
 function ApprovalPill({ status }: { status?: string }) {
   const key = (status || "").toLowerCase();
@@ -163,7 +194,16 @@ export default function PaymentDetailPage() {
         title={payment.payment_number || "Payment"}
         description="Payment details and approval status."
         actions={
-          <>
+          <div className="flex items-center gap-3">
+            <ExportButton
+              title="Payment Receipt"
+              filename={payment.payment_number || "payment"}
+              columns={SINGLE_PAYMENT_COLUMNS}
+              data={[payment]}
+              isDocument={true}
+              documentData={payment}
+              requiredPermission="payment.export"
+            />
             {canApprove ? (
               <Button onClick={handleApprove} disabled={busy !== null}>
                 {busy === "approve" ? "Approving..." : "Approve"}
@@ -178,7 +218,7 @@ export default function PaymentDetailPage() {
                 Reject
               </Button>
             ) : null}
-          </>
+          </div>
         }
       />
 
@@ -239,9 +279,7 @@ export default function PaymentDetailPage() {
             </div>
             <div className="mt-1 text-sm text-gray-700">
               Approved at:{" "}
-              {payment.approved_at
-                ? formatDateTime(payment.approved_at)
-                : "—"}
+              {payment.approved_at ? formatDateTime(payment.approved_at) : "—"}
             </div>
             <div className="text-sm text-gray-700">
               Approved by:{" "}
@@ -252,9 +290,7 @@ export default function PaymentDetailPage() {
             </div>
             <div className="text-sm text-gray-700">
               Rejected at:{" "}
-              {payment.rejected_at
-                ? formatDateTime(payment.rejected_at)
-                : "—"}
+              {payment.rejected_at ? formatDateTime(payment.rejected_at) : "—"}
             </div>
             {payment.rejection_reason ? (
               <div className="mt-2 rounded-md border border-red-200 bg-red-50 p-2 text-left text-xs text-red-700 sm:text-right">

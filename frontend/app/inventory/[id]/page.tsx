@@ -77,11 +77,7 @@ export default function ProductDetailPage() {
       if (res && res.success === false) {
         throw new Error(res.message || "Failed to update product.");
       }
-      flash(
-        product.is_active
-          ? "Product deactivated."
-          : "Product activated."
-      );
+      flash(product.is_active ? "Product deactivated." : "Product activated.");
       load();
     } catch (err: any) {
       flashError(err?.message || "Failed to update product.");
@@ -93,7 +89,7 @@ export default function ProductDetailPage() {
   async function handleDelete() {
     if (
       !window.confirm(
-        "Hard-delete this product? This cannot be undone. If the product is referenced by any document the delete will fail — use Deactivate instead."
+        "Hard-delete this product? This cannot be undone. If the product is referenced by any document the delete will fail — use Deactivate instead.",
       )
     ) {
       return;
@@ -108,7 +104,7 @@ export default function ProductDetailPage() {
     } catch (err: any) {
       flashError(
         (err?.message || "Failed to delete product.") +
-          " Tip: deactivate the product instead if it is referenced by existing documents."
+          " Tip: deactivate the product instead if it is referenced by existing documents.",
       );
       setBusy(null);
     }
@@ -157,8 +153,8 @@ export default function ProductDetailPage() {
                 {busy === "toggle"
                   ? "Saving..."
                   : product.is_active
-                  ? "Deactivate"
-                  : "Activate"}
+                    ? "Deactivate"
+                    : "Activate"}
               </Button>
               <Button
                 variant="danger"
@@ -351,7 +347,7 @@ function AdjustStockModal({
       }
       const data = res?.data || {};
       onSuccess(
-        `Stock updated: ${data.old_stock ?? "?"} → ${data.new_stock ?? "?"}`
+        `Stock updated: ${data.old_stock ?? "?"} → ${data.new_stock ?? "?"}`,
       );
     } catch (err: any) {
       setError(err?.message || "Failed to adjust stock.");

@@ -3,16 +3,8 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import {
-  apiDelete,
-  apiGet,
-  apiPost,
-  downloadFile,
-} from "@/lib/api";
-import {
-  formatCurrency,
-  formatDate,
-} from "@/lib/format";
+import { apiDelete, apiGet, apiPost, downloadFile } from "@/lib/api";
+import { formatCurrency, formatDate } from "@/lib/format";
 import { computeLineTotal } from "@/lib/totals";
 import { canEdit as canEditModule } from "@/lib/auth";
 import StatusBadge from "@/components/StatusBadge";
@@ -26,6 +18,15 @@ import {
   PageHeader,
   TextInput,
 } from "@/components/ui";
+import ExportButton from "@/components/ExportButton";
+import { ExportColumn } from "@/lib/ExportService";
+
+const SINGLE_QUOTATION_COLUMNS: ExportColumn[] = [
+  { label: "Description", key: "description" },
+  { label: "Quantity", key: "quantity" },
+  { label: "Unit Price", key: "unit_price" },
+  { label: "Tax Rate (%)", key: "tax_rate" },
+];
 
 export default function QuotationDetailPage() {
   const router = useRouter();
@@ -42,7 +43,10 @@ export default function QuotationDetailPage() {
   const [busy, setBusy] = useState<string | null>(null);
 
   const [showConvert, setShowConvert] = useState(false);
-  const [createdInvoice, setCreatedInvoice] = useState<{ id: string; invoice_number: string } | null>(null);
+  const [createdInvoice, setCreatedInvoice] = useState<{
+    id: string;
+    invoice_number: string;
+  } | null>(null);
 
   const [mayEdit, setMayEdit] = useState(false);
   useEffect(() => {
@@ -111,7 +115,7 @@ export default function QuotationDetailPage() {
     try {
       await downloadFile(
         `/quotations/${id}/pdf`,
-        `${quotation?.quotation_number || "quotation"}.pdf`
+        `${quotation?.quotation_number || "quotation"}.pdf`,
       );
     } catch (err: any) {
       flashError(err?.message || "Failed to download PDF.");
@@ -123,8 +127,7 @@ export default function QuotationDetailPage() {
   async function handleMark(action: "accepted" | "rejected") {
     setBusy(action);
     try {
-      const path =
-        action === "accepted" ? "mark-accepted" : "mark-rejected";
+      const path = action === "accepted" ? "mark-accepted" : "mark-rejected";
       const res = await apiPost(`/quotations/${id}/${path}`);
       if (res && res.success === false) {
         throw new Error(res.message || `Failed to mark ${action}.`);
@@ -144,7 +147,7 @@ export default function QuotationDetailPage() {
         // Backward cascade: linked proposal was also marked rejected.
         setCreatedInvoice(null);
         flash(
-          `Quotation rejected. Linked proposal ${res.cascaded.proposal_number} was also marked rejected.`
+          `Quotation rejected. Linked proposal ${res.cascaded.proposal_number} was also marked rejected.`,
         );
       } else {
         setCreatedInvoice(null);
@@ -163,7 +166,7 @@ export default function QuotationDetailPage() {
     const verb = isDraft ? "delete" : "cancel";
     if (
       !window.confirm(
-        `Are you sure you want to ${verb} this quotation? This cannot be undone.`
+        `Are you sure you want to ${verb} this quotation? This cannot be undone.`,
       )
     ) {
       return;
@@ -176,7 +179,7 @@ export default function QuotationDetailPage() {
       }
       if (res?.cascaded?.proposal_number) {
         setActionMsg(
-          `Quotation ${verb}ed. Linked proposal ${res.cascaded.proposal_number} was also marked rejected.`
+          `Quotation ${verb}ed. Linked proposal ${res.cascaded.proposal_number} was also marked rejected.`,
         );
         setTimeout(() => router.push("/quotations"), 2000);
       } else {
@@ -246,13 +249,16 @@ export default function QuotationDetailPage() {
                 {busy === "send" ? "Sending..." : "Send"}
               </Button>
             ) : null}
-            <Button
-              variant="secondary"
-              onClick={handlePdf}
-              disabled={busy !== null}
-            >
-              {busy === "pdf" ? "Preparing..." : "Download PDF"}
-            </Button>
+            <ExportButton
+              title="Quotation"
+              filename={quotation?.quotation_number || "quotation"}
+              columns={SINGLE_QUOTATION_COLUMNS}
+              data={[quotation]}
+              isDocument={true}
+              documentData={quotation}
+              pdfUrl={`/quotations/${id}/pdf`}
+              requiredPermission="quotations.read"
+            />
             {canMark ? (
               <>
                 <Button
@@ -288,8 +294,8 @@ export default function QuotationDetailPage() {
                 {busy === "delete"
                   ? "Working..."
                   : status === "draft"
-                  ? "Delete"
-                  : "Cancel"}
+                    ? "Delete"
+                    : "Cancel"}
               </Button>
             ) : null}
           </>
@@ -380,9 +386,7 @@ export default function QuotationDetailPage() {
             </div>
             <div className="mt-1 inline-flex flex-wrap gap-1.5">
               <StatusBadge status={quotation.status} />
-              {quotation.is_expired ? (
-                <StatusBadge status="expired" />
-              ) : null}
+              {quotation.is_expired ? <StatusBadge status="expired" /> : null}
             </div>
           </div>
           <div className="text-right">
@@ -475,7 +479,7 @@ export default function QuotationDetailPage() {
                       </td>
                       <td className="py-2 pl-2 text-right font-medium text-gray-900">
                         {formatCurrency(
-                          it.line_total != null ? it.line_total : r.lineTotal
+                          it.line_total != null ? it.line_total : r.lineTotal,
                         )}
                       </td>
                     </tr>
@@ -564,7 +568,7 @@ function ConvertToInvoiceModal({
     e.preventDefault();
     if (
       !window.confirm(
-        "Convert this quotation to an invoice? The quotation will be marked Converted."
+        "Convert this quotation to an invoice? The quotation will be marked Converted.",
       )
     ) {
       return;
@@ -575,7 +579,7 @@ function ConvertToInvoiceModal({
       if (dueDate) body.due_date = dueDate;
       const res = await apiPost(
         `/quotations/${quotationId}/convert-to-invoice`,
-        body
+        body,
       );
       if (res && res.success === false) {
         throw new Error(res.message || "Failed to convert.");

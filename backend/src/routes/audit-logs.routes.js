@@ -1,33 +1,40 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const supabase = require('../config/supabase');
-const { authenticate, requirePermission } = require('../middleware/auth.middleware');
-const { createAuditLog } = require('../services/audit.service');
-const { toCsv } = require('../utils/csv');
-const { sanitizeSearch } = require('../utils/escape');
+const supabase = require("../config/supabase");
+const {
+  authenticate,
+  requirePermission,
+} = require("../middleware/auth.middleware");
+const { createAuditLog } = require("../services/audit.service");
+const { generateTablePdf } = require("../services/pdf.service");
+const { sanitizeSearch } = require("../utils/escape");
 
 router.use(authenticate);
 // Audit logs are Admin/Manager only (any role missing `audit_logs.read` is
 // rejected). Employees never see this module.
-router.use(requirePermission('audit_logs.read'));
+router.use(requirePermission("audit_logs.read"));
 
 function applyFilters(q, query) {
   const { module, action, user_id, from, to } = query;
   const search = sanitizeSearch(query.search);
-  if (module) q = q.eq('module', module);
-  if (action) q = q.eq('action', action);
-  if (user_id) q = q.eq('user_id', user_id);
-  if (from) q = q.gte('created_at', from);
-  if (to) q = q.lte('created_at', to + 'T23:59:59.999Z');
+  if (module) q = q.eq("module", module);
+  if (action) q = q.eq("action", action);
+  if (user_id) q = q.eq("user_id", user_id);
+  if (from) q = q.gte("created_at", from);
+  if (to) q = q.lte("created_at", to + "T23:59:59.999Z");
   if (search) q = q.or(`action.ilike.*${search}*,user_name.ilike.*${search}*`);
   return q;
 }
 
 // GET /audit-logs  -- list with filters
-router.get('/', async (req, res, next) => {
+router.get("/", async (req, res, next) => {
   try {
     const limit = Math.min(parseInt(req.query.limit, 10) || 200, 1000);
-    let q = supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(limit);
+    let q = supabase
+      .from("audit_logs")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(limit);
     q = applyFilters(q, req.query);
 
     const { data, error } = await q;
@@ -38,33 +45,86 @@ router.get('/', async (req, res, next) => {
   }
 });
 
-// GET /audit-logs/export  -- CSV
-router.get('/export', async (req, res, next) => {
+// GET /audit-logs/export  -- PDF
+router.get("/export", async (req, res, next) => {
   try {
-    let q = supabase.from('audit_logs').select('*').order('created_at', { ascending: false }).limit(5000);
+    let q = supabase
+      .from("audit_logs")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(5000);
     q = applyFilters(q, req.query);
 
     const { data, error } = await q;
     if (error) throw error;
 
-    const csv = toCsv(data || [], [
-      { key: 'created_at', label: 'Timestamp' },
-      { key: 'user_name', label: 'User' },
-      { key: 'action', label: 'Action' },
-      { key: 'module', label: 'Module' },
-      { key: 'entity_type', label: 'Entity Type' },
-      { key: 'entity_id', label: 'Entity Id' },
-      { key: 'ip_address', label: 'IP Address' },
-      { label: 'Details', value: (r) => (r.details ? JSON.stringify(r.details) : '') }
-    ]);
+    const { data: company } = await supabase
+      .from("company_settings")
+      .select("*")
+      .limit(1)
+      .maybeSingle();
 
-    await createAuditLog({ req, action: 'csv_exported', module: 'Audit Logs', details: { count: (data || []).length } });
+    const columns = [
+      {
+        label: "Time",
+        value: (r) =>
+          r.created_at
+            ? new Date(r.created_at)
+                .toISOString()
+                .replace("T", " ")
+                .slice(0, 19)
+            : "",
+      },
+      { label: "User", value: "user_name" },
+      { label: "Action", value: "action" },
+      { label: "Module", value: "module" },
+      {
+        label: "Entity",
+        value: (r) =>
+          [r.entity_type, r.entity_id].filter(Boolean).join(": ") || "—",
+      },
+      { label: "IP Address", value: "ip_address" },
+    ];
 
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', 'attachment; filename="audit-logs.csv"');
-    res.send(csv);
+    const pdf = await generateTablePdf(
+      "Audit Logs Report",
+      columns,
+      data || [],
+      {
+        dateFrom: req.query.from,
+        dateTo: req.query.to,
+      },
+      company || {},
+    );
+
+    createAuditLog({
+      req,
+      action: "report_exported",
+      module: "Audit Logs",
+      details: {
+        type: "audit_logs",
+        format: "pdf",
+        count: (data || []).length,
+      },
+    }).catch((err) => {});
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      'attachment; filename="Audit_Logs_Report.pdf"',
+    );
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.send(pdf);
   } catch (err) {
-    next(err);
+    console.error("[audit-logs/export] Error:", err);
+    if (!res.headersSent) {
+      res
+        .status(500)
+        .json({
+          success: false,
+          message: "Unable to generate Audit Logs PDF.",
+        });
+    }
   }
 });
 

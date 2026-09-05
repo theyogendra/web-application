@@ -28,7 +28,7 @@ function readCookie(name: string): string | null {
   if (typeof document === "undefined") return null;
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const m = document.cookie.match(
-    new RegExp("(?:^|; )" + escaped + "=([^;]*)")
+    new RegExp("(?:^|; )" + escaped + "=([^;]*)"),
   );
   return m ? decodeURIComponent(m[1]) : null;
 }
@@ -72,7 +72,9 @@ async function parseResponse(res: Response): Promise<any> {
       }
     }
     const message =
-      (body && typeof body === "object" && (body.message || body.detail || body.error)) ||
+      (body &&
+        typeof body === "object" &&
+        (body.message || body.detail || body.error)) ||
       (typeof body === "string" && body) ||
       `Request failed with status ${res.status}`;
     throw new ApiError(message, res.status, body);
@@ -85,11 +87,50 @@ function handleNetworkError(err: any): never {
   throw new ApiError(
     "Cannot reach the server. Make sure the backend is running.",
     0,
-    null
+    null,
   );
 }
 
-export async function apiGet(path: string): Promise<any> {
+type CacheEntry = {
+  data: any;
+  timestamp: number;
+};
+
+const getCache = new Map<string, CacheEntry>();
+const DEFAULT_TTL_MS = 60 * 1000; // 60s default cache TTL
+
+export function clearApiCache(prefix?: string): void {
+  if (!prefix) {
+    getCache.clear();
+    return;
+  }
+  getCache.forEach((_, key) => {
+    if (key.includes(prefix)) {
+      getCache.delete(key);
+    }
+  });
+}
+
+export type ApiGetOptions = {
+  useCache?: boolean;
+  ttlMs?: number;
+};
+
+export async function apiGet(
+  path: string,
+  options?: ApiGetOptions,
+): Promise<any> {
+  const useCache = options?.useCache ?? true;
+  const ttlMs = options?.ttlMs ?? DEFAULT_TTL_MS;
+  const cacheKey = path;
+
+  if (useCache) {
+    const cached = getCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < ttlMs) {
+      return cached.data;
+    }
+  }
+
   try {
     const res = await fetch(buildUrl(path), {
       method: "GET",
@@ -97,7 +138,11 @@ export async function apiGet(path: string): Promise<any> {
       credentials: "include",
       cache: "no-store",
     });
-    return await parseResponse(res);
+    const data = await parseResponse(res);
+    if (useCache && data) {
+      getCache.set(cacheKey, { data, timestamp: Date.now() });
+    }
+    return data;
   } catch (err) {
     return handleNetworkError(err);
   }
@@ -115,7 +160,9 @@ export async function apiPost(path: string, body?: any): Promise<any> {
       credentials: "include",
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
-    return await parseResponse(res);
+    const data = await parseResponse(res);
+    clearApiCache();
+    return data;
   } catch (err) {
     return handleNetworkError(err);
   }
@@ -133,7 +180,9 @@ export async function apiPut(path: string, body?: any): Promise<any> {
       credentials: "include",
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
-    return await parseResponse(res);
+    const data = await parseResponse(res);
+    clearApiCache();
+    return data;
   } catch (err) {
     return handleNetworkError(err);
   }
@@ -146,7 +195,9 @@ export async function apiDelete(path: string): Promise<any> {
       headers: { Accept: "application/json", ...authHeaders("DELETE") },
       credentials: "include",
     });
-    return await parseResponse(res);
+    const data = await parseResponse(res);
+    clearApiCache();
+    return data;
   } catch (err) {
     return handleNetworkError(err);
   }
@@ -161,64 +212,147 @@ export async function apiPostForm(path: string, form: FormData): Promise<any> {
       credentials: "include",
       body: form,
     });
-    return await parseResponse(res);
+    const data = await parseResponse(res);
+    clearApiCache();
+    return data;
   } catch (err) {
     return handleNetworkError(err);
   }
 }
 
 // Fetch a file endpoint as a blob and trigger a browser download.
+//
+// Parameters:
+//   path        — API path (relative to API_BASE) or full URL.
+//   filename    — Override the download filename. If omitted, derived from
+//                 Content-Disposition or the URL path.
+//   expectedMime — Optional. When provided, the function validates that the
+//                 server's Content-Type starts with this string.  This is the
+//                 main guard against the server accidentally returning a JSON
+//                 error body or an HTML page instead of the file.
 export async function downloadFile(
   path: string,
-  filename?: string
+  filename?: string,
+  expectedMime?: string,
 ): Promise<void> {
+  // Build Accept header so intermediaries (proxies, CDNs) don't return HTML.
+  const acceptHeader = expectedMime ? `${expectedMime}, */*;q=0.8` : "*/*";
+
   let res: Response;
   try {
     res = await fetch(buildUrl(path), {
       method: "GET",
-      headers: { ...authHeaders("GET") },
+      headers: { Accept: acceptHeader, ...authHeaders("GET") },
       credentials: "include",
+      cache: "no-store",
     });
   } catch (err) {
     throw new ApiError(
       "Cannot reach the server. Make sure the backend is running.",
       0,
-      null
+      null,
     );
   }
+
   if (!res.ok) {
+    // Try to surface the server error message even for binary endpoints.
     let message = `Download failed with status ${res.status}`;
     try {
-      const txt = await res.text();
-      if (txt) message = txt;
+      const ct = res.headers.get("content-type") || "";
+      if (ct.includes("application/json")) {
+        const j = await res.json().catch(() => ({}));
+        message = j.message || j.error || message;
+      } else {
+        const txt = await res.text().catch(() => "");
+        if (txt) message = txt;
+      }
     } catch {
-      // ignore
+      // ignore parse errors
     }
     throw new ApiError(message, res.status, null);
   }
 
+  // ── Validate response Content-Type ───────────────────────────────────────
+  // This catches the common bug where the server returns a JSON error (or an
+  // HTML gateway error) but sets a 200 status code.
+  const serverCt = res.headers.get("content-type") || "";
+  if (expectedMime && !serverCt.includes(expectedMime)) {
+    // Peek at the body to surface a meaningful error message.
+    let detail = "";
+    try {
+      const txt = await res.text();
+      if (txt.length < 2000) {
+        const parsed = JSON.parse(txt);
+        detail = parsed.message || parsed.error || txt;
+      } else {
+        detail = txt.slice(0, 300);
+      }
+    } catch {
+      // ignore
+    }
+    throw new ApiError(
+      `Server returned '${serverCt}' instead of '${expectedMime}'. ` +
+        (detail ? `Detail: ${detail}` : "The file may be an error response."),
+      res.status,
+      null,
+    );
+  }
+
+  // ── Read body as Blob ─────────────────────────────────────────────────────
   const blob = await res.blob();
 
-  // Try to derive a filename from the Content-Disposition header.
+  // Re-type the blob with the correct MIME so the browser opens it correctly.
+  const mimeToUse =
+    expectedMime || serverCt.split(";")[0].trim() || "application/octet-stream";
+  const typedBlob = new Blob([blob], { type: mimeToUse });
+
+  // ── Derive filename ───────────────────────────────────────────────────────
   let name = filename;
   if (!name) {
     const disp = res.headers.get("content-disposition") || "";
-    const match = disp.match(/filename="?([^"]+)"?/i);
-    if (match) name = match[1];
+    const match = disp.match(
+      /filename\*?=(?:UTF-8'')?["']?([^"';\r\n]+)["']?/i,
+    );
+    if (match) name = decodeURIComponent(match[1].trim());
   }
   if (!name) {
     const parts = path.split("?")[0].split("/");
     name = parts[parts.length - 1] || "download";
   }
 
-  const url = window.URL.createObjectURL(blob);
+  // ── Trigger browser download ──────────────────────────────────────────────
+  const url = window.URL.createObjectURL(typedBlob);
   const a = document.createElement("a");
+  a.style.display = "none";
   a.href = url;
   a.download = name;
   document.body.appendChild(a);
   a.click();
-  a.remove();
-  window.URL.revokeObjectURL(url);
+  // Revoke after a short delay so the browser has time to start the download.
+  setTimeout(() => {
+    a.remove();
+    window.URL.revokeObjectURL(url);
+  }, 150);
+}
+
+/** Convenience wrapper: downloads a CSV file with MIME validation. */
+export async function downloadCsv(
+  path: string,
+  filename?: string,
+): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const name = filename || `Report_${today}.csv`;
+  return downloadFile(path, name, "text/csv");
+}
+
+/** Convenience wrapper: downloads a PDF file with MIME validation. */
+export async function downloadPdf(
+  path: string,
+  filename?: string,
+): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10);
+  const name = filename || `Report_${today}.pdf`;
+  return downloadFile(path, name, "application/pdf");
 }
 
 export { API_BASE };

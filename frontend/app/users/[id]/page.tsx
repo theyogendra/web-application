@@ -6,13 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import { apiDelete, apiGet, apiPut, ApiError } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import { isAdmin } from "@/lib/auth";
-import {
-  Button,
-  Card,
-  ErrorState,
-  Loading,
-  PageHeader,
-} from "@/components/ui";
+import { Button, Card, ErrorState, Loading, PageHeader } from "@/components/ui";
 
 export default function UserDetailPage() {
   const router = useRouter();
@@ -225,11 +219,12 @@ export default function UserDetailPage() {
             </div>
             <div className="mt-1 text-sm text-gray-600">
               Last login:{" "}
-              {user.last_login_at ? formatDateTime(user.last_login_at) : "Never"}
+              {user.last_login_at
+                ? formatDateTime(user.last_login_at)
+                : "Never"}
             </div>
             <div className="text-sm text-gray-600">
-              Created:{" "}
-              {user.created_at ? formatDateTime(user.created_at) : "—"}
+              Created: {user.created_at ? formatDateTime(user.created_at) : "—"}
             </div>
           </div>
         </div>
@@ -243,8 +238,8 @@ export default function UserDetailPage() {
           {user.role?.name === "Admin" || user.is_superuser
             ? "Admins have full access to every module."
             : user.role?.name === "Manager"
-            ? "Managers can view and edit every module except user management."
-            : "Granted modules and access level."}
+              ? "Managers can view and edit every module except user management."
+              : "Granted modules and access level."}
         </p>
         {accessEntries.length === 0 ? (
           <p className="text-sm text-gray-500">

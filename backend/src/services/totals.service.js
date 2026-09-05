@@ -38,7 +38,7 @@ function calculateTotals(items = []) {
       tax_amount: round2(taxAmount),
       line_subtotal: round2(lineSubtotal),
       line_total: round2(lineTotal),
-      total: round2(lineTotal)
+      total: round2(lineTotal),
     });
   }
 
@@ -48,8 +48,8 @@ function calculateTotals(items = []) {
       subtotal: round2(subtotal),
       discount: round2(discount),
       tax_amount: round2(tax),
-      grand_total: round2(grand)
-    }
+      grand_total: round2(grand),
+    },
   };
 }
 

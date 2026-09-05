@@ -190,23 +190,21 @@ export function Field({
 const inputClass =
   "w-full rounded-lg border border-[var(--separator)] bg-[var(--bg-surface)] px-3 py-2 text-[14px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] transition-all outline-none focus:border-[#0071E3] focus:shadow-[0_0_0_3px_rgba(10,132,255,0.15)] disabled:cursor-not-allowed disabled:opacity-60";
 
-export function TextInput(
-  props: React.InputHTMLAttributes<HTMLInputElement>
-) {
+export function TextInput(props: React.InputHTMLAttributes<HTMLInputElement>) {
   const { className = "", ...rest } = props;
   return <input {...rest} className={`${inputClass} ${className}`} />;
 }
 
 export function TextArea(
-  props: React.TextareaHTMLAttributes<HTMLTextAreaElement>
+  props: React.TextareaHTMLAttributes<HTMLTextAreaElement>,
 ) {
   const { className = "", ...rest } = props;
-  return <textarea {...rest} className={`${inputClass} min-h-[80px] ${className}`} />;
+  return (
+    <textarea {...rest} className={`${inputClass} min-h-[80px] ${className}`} />
+  );
 }
 
-export function Select(
-  props: React.SelectHTMLAttributes<HTMLSelectElement>
-) {
+export function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   const { className = "", children, ...rest } = props;
   return (
     <select {...rest} className={`${inputClass} pr-8 ${className}`}>

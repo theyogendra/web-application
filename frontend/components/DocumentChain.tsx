@@ -21,8 +21,8 @@ function Stage({ href, label, number, status, current, Icon }: StageProps) {
         current
           ? "border-[#0071E3]/30 bg-[#0A84FF]/8"
           : href
-          ? "border-[var(--separator-soft)] bg-[var(--bg-subtle)] hover:bg-[var(--bg-surface)] hover:border-[var(--separator)]"
-          : "border-dashed border-[var(--separator-soft)] bg-transparent opacity-60",
+            ? "border-[var(--separator-soft)] bg-[var(--bg-subtle)] hover:bg-[var(--bg-surface)] hover:border-[var(--separator)]"
+            : "border-dashed border-[var(--separator-soft)] bg-transparent opacity-60",
       ].join(" ")}
     >
       <Icon
@@ -45,7 +45,9 @@ function Stage({ href, label, number, status, current, Icon }: StageProps) {
     </div>
   );
   return href ? (
-    <Link href={href} className="block">{body}</Link>
+    <Link href={href} className="block">
+      {body}
+    </Link>
   ) : (
     body
   );
@@ -64,9 +66,21 @@ export default function DocumentChain({
   invoice,
   currentType,
 }: {
-  proposal?: { id?: string | null; number?: string | null; status?: string | null } | null;
-  quotation?: { id?: string | null; number?: string | null; status?: string | null } | null;
-  invoice?: { id?: string | null; number?: string | null; status?: string | null } | null;
+  proposal?: {
+    id?: string | null;
+    number?: string | null;
+    status?: string | null;
+  } | null;
+  quotation?: {
+    id?: string | null;
+    number?: string | null;
+    status?: string | null;
+  } | null;
+  invoice?: {
+    id?: string | null;
+    number?: string | null;
+    status?: string | null;
+  } | null;
   currentType: "proposal" | "quotation" | "invoice";
 }) {
   return (

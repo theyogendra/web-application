@@ -17,6 +17,22 @@ import {
   Select,
   TextInput,
 } from "@/components/ui";
+import ExportButton from "@/components/ExportButton";
+import { ExportColumn } from "@/lib/ExportService";
+
+const INVENTORY_COLUMNS: ExportColumn[] = [
+  { label: "SKU", key: "sku" },
+  { label: "Name", key: "name" },
+  { label: "Category", key: "category" },
+  { label: "Unit", key: "unit" },
+  { label: "Price", key: "price" },
+  { label: "Stock", key: "stock" },
+  {
+    label: "Status",
+    key: "is_active",
+    value: (row: any) => (row.is_active ? "Active" : "Inactive"),
+  },
+];
 
 export default function InventoryPage() {
   const router = useRouter();
@@ -91,11 +107,19 @@ export default function InventoryPage() {
         title="Inventory"
         description="Manage your products, stock levels and pricing."
         actions={
-          mayEdit ? (
-            <Link href="/inventory/create">
-              <Button>+ New Product</Button>
-            </Link>
-          ) : null
+          <div className="flex items-center gap-3">
+            <ExportButton
+              title="Inventory Report"
+              filename={`Inventory_Report_${new Date().toISOString().slice(0, 10)}`}
+              columns={INVENTORY_COLUMNS}
+              data={products}
+            />
+            {mayEdit ? (
+              <Link href="/inventory/create">
+                <Button>+ New Product</Button>
+              </Link>
+            ) : null}
+          </div>
         }
       />
 
@@ -192,15 +216,15 @@ export default function InventoryPage() {
                     <td className="px-4 py-3 text-gray-600">
                       {p.category || "-"}
                     </td>
-                    <td className="px-4 py-3 text-gray-600">
-                      {p.unit || "-"}
-                    </td>
+                    <td className="px-4 py-3 text-gray-600">{p.unit || "-"}</td>
                     <td className="px-4 py-3 text-right text-gray-900">
                       {formatCurrency(p.price)}
                     </td>
                     <td
                       className={`px-4 py-3 text-right font-medium ${
-                        p.out_of_stock || p.low_stock ? "text-red-600" : "text-gray-900"
+                        p.out_of_stock || p.low_stock
+                          ? "text-red-600"
+                          : "text-gray-900"
                       }`}
                     >
                       <span className="inline-flex items-center gap-2">

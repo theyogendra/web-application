@@ -12,7 +12,7 @@ const PUBLIC_ROUTES = ["/login"];
 
 function isPublic(pathname: string): boolean {
   return PUBLIC_ROUTES.some(
-    (p) => pathname === p || pathname.startsWith(p + "/")
+    (p) => pathname === p || pathname.startsWith(p + "/"),
   );
 }
 
@@ -55,13 +55,13 @@ export default function LayoutShell({
       <div className="flex flex-1 flex-col overflow-hidden">
         <TopNavbar />
         <main className="flex-1 overflow-y-auto px-8 py-8">
-          <AnimatePresence mode="wait">
+          <AnimatePresence initial={false}>
             <motion.div
               key={pathname}
-              initial={{ opacity: 0, y: 6 }}
+              initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+              transition={{ duration: 0.15, ease: [0.16, 1, 0.3, 1] }}
             >
               {children}
             </motion.div>

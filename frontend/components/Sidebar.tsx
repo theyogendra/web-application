@@ -20,19 +20,19 @@ import { isStaff } from "@/lib/auth";
 type NavItem = {
   href: string;
   label: string;
-  icon: any;   // lucide-react components type as ForwardRefExoticComponent; keep loose
+  icon: any; // lucide-react components type as ForwardRefExoticComponent; keep loose
   staffOnly?: boolean;
 };
 
 const NAV: NavItem[] = [
-  { href: "/reports",    label: "Reports",    icon: BarChart3 },
-  { href: "/inventory",  label: "Inventory",  icon: Package },
-  { href: "/proposals",  label: "Proposals",  icon: FileText },
+  { href: "/reports", label: "Reports", icon: BarChart3 },
+  { href: "/inventory", label: "Inventory", icon: Package },
+  { href: "/proposals", label: "Proposals", icon: FileText },
   { href: "/quotations", label: "Quotations", icon: FileText },
-  { href: "/invoices",   label: "Invoices",   icon: Receipt },
-  { href: "/payments",   label: "Payments",   icon: CreditCard },
+  { href: "/invoices", label: "Invoices", icon: Receipt },
+  { href: "/payments", label: "Payments", icon: CreditCard },
   { href: "/audit-logs", label: "Audit Logs", icon: Activity, staffOnly: true },
-  { href: "/users",      label: "Users",      icon: Users,    staffOnly: true },
+  { href: "/users", label: "Users", icon: Users, staffOnly: true },
 ];
 
 const COLLAPSE_KEY = "ip_sidebar_collapsed";
@@ -126,7 +126,9 @@ export default function Sidebar() {
           className="flex w-full items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-[12px] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--bg-subtle)] hover:text-[var(--text-primary)] dark:hover:bg-[#2C2C2E]"
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
-          {collapsed ? <ChevronRight size={16} /> : (
+          {collapsed ? (
+            <ChevronRight size={16} />
+          ) : (
             <>
               <ChevronLeft size={14} />
               <span>Collapse</span>
